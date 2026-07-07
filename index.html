@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Brocante | Le Marché Public Libre</title>
+    <script>
+      // Gracefully capture and mock benign HMR WebSocket/Vite connections
+      // This completely silences HMR connection failures in sandboxed/proxy environment
+      (function() {
+        const OriginalWebSocket = window.WebSocket;
+        if (!OriginalWebSocket) return;
+        
+        function MockWebSocket(url, protocols) {
+          if (typeof url === 'string' && (url.includes('vite') || url.includes('hmr'))) {
+            console.warn('Suppressing Vite HMR WebSocket connection:', url);
+            
+            const target = document.createElement('div');
+            const ws = {
+              url: url,
+              readyState: 0, // CONNECTING
+              bufferedAmount: 0,
+              extensions: '',
+              protocol: protocols || '',
+              binaryType: 'blob',
+              
+              send: function(data) {
+                // Noop standard messages
+              },
+              close: function(code, reason) {
+                ws.readyState = 3; // CLOSED
+                setTimeout(() => {
+                  if (ws.onclose) ws.onclose({ code: code || 1000, reason: reason || '', wasClean: true });
+                  target.dispatchEvent(new CustomEvent('close', { detail: { code, reason, wasClean: true } }));
+                }, 0);
+              },
+              
+              addEventListener: function(type, listener, options) {
+                target.addEventListener(type, listener, options);
+              },
+              removeEventListener: function(type, listener, options) {
+                target.removeEventListener(type, listener, options);
+              },
+              dispatchEvent: function(event) {
+                return target.dispatchEvent(event);
+              }
+            };
+
+            let _onopen = null;
+            let _onmessage = null;
+            let _onerror = null;
+            let _onclose = null;
+
+            Object.defineProperties(ws, {
+              onopen: {
+                get: () => _onopen,
+                set: (val) => {
+                  if (_onopen) target.removeEventListener('open', _onopen);
+                  _onopen = val;
+                  if (val) target.addEventListener('open', val);
+                }
+              },
+              onmessage: {
+                get: () => _onmessage,
+                set: (val) => {
+                  if (_onmessage) target.removeEventListener('message', _onmessage);
+                  _onmessage = val;
+                  if (val) target.addEventListener('message', val);
+                }
+              },
+              onerror: {
+                get: () => _onerror,
+                set: (val) => {
+                  if (_onerror) target.removeEventListener('error', _onerror);
+                  _onerror = val;
+                  if (val) target.addEventListener('error', val);
+                }
+              },
+              onclose: {
+                get: () => _onclose,
+                set: (val) => {
+                  if (_onclose) target.removeEventListener('close', _onclose);
+                  _onclose = val;
+                  if (val) target.addEventListener('close', val);
+                }
+              }
+            });
+
+            // Trigger fake success connection
+            setTimeout(() => {
+              ws.readyState = 1; // OPEN
+              if (ws.onopen) ws.onopen();
+              target.dispatchEvent(new Event('open'));
+            }, 50);
+
+            return ws;
+          }
+          return new OriginalWebSocket(url, protocols);
+        }
+
+        MockWebSocket.CONNECTING = 0;
+        MockWebSocket.OPEN = 1;
+        MockWebSocket.CLOSING = 2;
+        MockWebSocket.CLOSED = 3;
+        MockWebSocket.prototype = OriginalWebSocket.prototype;
+        window.WebSocket = MockWebSocket;
+      })();
+
+      // General escape hatch for any unhandled rejection associated to HMR
+      window.addEventListener('unhandledrejection', function(event) {
+        if (event.reason && (
+          String(event.reason).includes('WebSocket') ||
+          String(event.reason).includes('vite') ||
+          String(event.reason.message || '').includes('WebSocket')
+        )) {
+          event.preventDefault();
+        }
+      });
+      window.addEventListener('error', function(event) {
+        if (event.message && (
+          event.message.includes('WebSocket') ||
+          event.message.includes('vite')
+        )) {
+          event.preventDefault();
+        }
+      });
+    </script>
+  </head>
+  <body class="bg-[#fcfbf9]">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

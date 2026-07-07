@@ -1,0 +1,13 @@
+node_modules
+dist
+.env
+.env.local
+.env.*.local
+project.zip
+*.log
+server.cjs
+.gemini
+.agents
+.system_generated
+.tempmediaStorage
+uploads

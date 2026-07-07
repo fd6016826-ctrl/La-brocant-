@@ -1,0 +1,8 @@
+{
+  "name": "La Brocante",
+  "description": "Une plateforme de brocante et marché public de proximité permettant à chacun de publier des annonces pour vendre n'importe quoi librement et sans commission.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
