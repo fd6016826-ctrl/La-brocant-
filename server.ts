@@ -11,7 +11,7 @@ dotenv.config();
 
 const localFilename = typeof __filename !== "undefined"
   ? __filename
-  : fileURLToPath(new Function("return import.meta.url")());
+  : fileURLToPath(import.meta.url);
 
 const localDirname = typeof __dirname !== "undefined"
   ? __dirname
