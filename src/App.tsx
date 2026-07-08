@@ -411,6 +411,20 @@ export default function App() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [chatInputToInject, setChatInputToInject] = useState<string | null>(null);
 
+  const isAnyModalOpen = !!(
+    isCreateModalOpen ||
+    isDemandModalOpen ||
+    activeListing ||
+    isPremiumModalOpen ||
+    selectedUserProfile ||
+    isAccountModalOpen ||
+    showDemandInfoModal ||
+    showGlobalTerms ||
+    isLoginOpen
+  );
+
+  const shouldHideNav = isAnyModalOpen || (viewMode === "messages" && !!activeThreadId);
+
   // User's interesting products/favorites list state
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
@@ -1041,7 +1055,7 @@ export default function App() {
           {currentUserEmail && (
             <div 
               className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-52 w-auto px-4 max-w-[95vw] transition-all duration-300 ease-in-out ${
-                isNavVisible ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none"
+                isNavVisible && !shouldHideNav ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none"
               }`}
             >
               <ExpandableTabs
@@ -3352,7 +3366,7 @@ export default function App() {
 
       {/* Centered Desktop & Mobile Bottom Floating Navigation Utilizing ExpandableTabs */}
       <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-52 w-auto px-4 max-w-[95vw] transition-all duration-300 ease-in-out ${
-        isNavVisible ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none"
+        isNavVisible && !shouldHideNav ? "translate-y-0 opacity-100" : "translate-y-20 opacity-0 pointer-events-none"
       }`}>
         <ExpandableTabs
           tabs={[
