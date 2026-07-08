@@ -24,6 +24,9 @@ if (!supabaseUrl || !supabaseKey) {
 }
 const supabaseClient = createClient(supabaseUrl, supabaseKey);
 
+// Store pending mock OTP sessions in memory
+const pendingOtps = new Map<string, { code: string; expiresAt: number }>();
+
 // FLAG for local fallback DB
 let useLocalDb = false;
 
@@ -1709,6 +1712,89 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     } catch (err) {
       console.error("Error saving user to DB:", err);
       res.status(500).json({ error: "Impossible d'enregistrer l'utilisateur." });
+    }
+  });
+
+  // POST /api/auth/send-otp - Request e-mail OTP
+  app.post("/api/auth/send-otp", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        res.status(400).json({ error: "Email requis." });
+        return;
+      }
+      
+      const cleanEmail = email.trim().toLowerCase();
+      const mockCode = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
+
+      if (useLocalDb) {
+        // Local DB mode always uses simulated OTP
+        pendingOtps.set(cleanEmail, { code: mockCode, expiresAt: Date.now() + 10 * 60 * 1000 });
+        res.json({ success: true, isMocked: true, code: mockCode });
+      } else {
+        // Try real e-mail OTP via Supabase Auth
+        const { error } = await supabaseClient.auth.signInWithOtp({
+          email: cleanEmail,
+          options: {
+            shouldCreateUser: true
+          }
+        });
+
+        if (error) {
+          console.warn("Supabase Auth OTP error, falling back to mock:", error.message);
+          // Fallback to mock code if rate limited or similar
+          pendingOtps.set(cleanEmail, { code: mockCode, expiresAt: Date.now() + 10 * 60 * 1000 });
+          res.json({ success: true, isMocked: true, code: mockCode });
+        } else {
+          // Success: real email sent by Supabase
+          res.json({ success: true, isMocked: false });
+        }
+      }
+    } catch (err) {
+      console.error("Error in /api/auth/send-otp:", err);
+      res.status(500).json({ error: "Erreur serveur lors de l'envoi du code." });
+    }
+  });
+
+  // POST /api/auth/verify-otp - Verify e-mail OTP code
+  app.post("/api/auth/verify-otp", async (req, res) => {
+    try {
+      const { email, code } = req.body;
+      if (!email || !code) {
+        res.status(400).json({ error: "Email et code requis." });
+        return;
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanCode = code.trim();
+
+      // Check if we have a pending mock session first
+      const mockSession = pendingOtps.get(cleanEmail);
+      if (mockSession && mockSession.code === cleanCode && mockSession.expiresAt > Date.now()) {
+        pendingOtps.delete(cleanEmail);
+        res.json({ success: true, message: "Code vérifié avec succès (mode simulation)." });
+        return;
+      }
+
+      if (useLocalDb) {
+        res.status(400).json({ error: "Code de validation incorrect." });
+      } else {
+        // Verify via real Supabase Auth
+        const { error } = await supabaseClient.auth.verifyOtp({
+          email: cleanEmail,
+          token: cleanCode,
+          type: "email"
+        });
+
+        if (error) {
+          res.status(400).json({ error: "Code de validation incorrect ou expiré." });
+        } else {
+          res.json({ success: true, message: "Code vérifié avec succès." });
+        }
+      }
+    } catch (err) {
+      console.error("Error in /api/auth/verify-otp:", err);
+      res.status(500).json({ error: "Erreur serveur lors de la vérification." });
     }
   });
 

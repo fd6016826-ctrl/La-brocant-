@@ -125,3 +125,11 @@ Pour valider et profiter de ces changements, voici ce que vous devez faire :
 7. **Script de Création des Tables Supabase (SQL) :**
    - Création du fichier [supabase_schema.sql](file:///c:/Users/bmd/Documents/brocant%20achat%20et%2520vente/supabase_schema.sql) à la racine du projet contenant le script de création de toutes les tables (`profiles`, `listings`, `demands`, `chats`) et les règles de sécurité associées (RLS), prêt à être exécuté dans l'éditeur SQL de Supabase.
 
+8. **Vérification OTP Réelle par E-mail (Supabase Auth) :**
+   - Implémentation de deux nouveaux endpoints API dans `server.ts` :
+     - `POST /api/auth/send-otp` : Envoie un vrai e-mail OTP de 6 chiffres à l'utilisateur via `supabase.auth.signInWithOtp`. En cas de limitation de taux (rate limit) ou d'erreur Supabase, le serveur bascule automatiquement vers un code simulé affiché dans une notification à l'écran (mode démonstration).
+     - `POST /api/auth/verify-otp` : Valide le code saisi par l'utilisateur via `supabase.auth.verifyOtp`. Si le mode simulé était actif, le code stocké en mémoire est comparé directement.
+   - Mise à jour de `LoginPage.tsx` :
+     - Passage des champs de saisie OTP de **4 chiffres à 6 chiffres** (format natif Supabase).
+     - La notification toast affiche désormais deux messages distincts : un pour le mode simulé (avec le code en clair) et un pour le vrai e-mail (indiquant que le code a été envoyé à l'adresse e-mail saisie).
+     - Les boutons de soumission (Continuer, Confirmer) affichent un texte de chargement ("Envoi du code...", "Vérification...") et sont désactivés pendant les appels réseau pour éviter les soumissions multiples.

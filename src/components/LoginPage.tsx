@@ -81,9 +81,10 @@ export function LoginPage({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [otpValues, setOtpValues] = useState<string[]>(["", "", "", ""]);
+  const [otpValues, setOtpValues] = useState<string[]>(["", "", "", "", "", ""]);
   const [otpTimer, setOtpTimer] = useState<number>(59);
-  const [generatedOtp, setGeneratedOtp] = useState<string>("3645");
+  const [generatedOtp, setGeneratedOtp] = useState<string>("");
+  const [isMockOtp, setIsMockOtp] = useState<boolean>(false);
   const [showOtpNotification, setShowOtpNotification] = useState<boolean>(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
@@ -119,25 +120,55 @@ export function LoginPage({
     }
   };
 
-  const generateAndSendOtp = (targetEmail: string, origin: "login" | "register" | "forgot_password") => {
+  const [isLoadingOtp, setIsLoadingOtp] = useState(false);
+
+  const generateAndSendOtp = async (targetEmail: string, origin: "login" | "register" | "forgot_password") => {
     setErrorMsg("");
     setSuccessMsg("");
+    setIsLoadingOtp(true);
 
-    // Generate a random 4-digit code
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-    setGeneratedOtp(code);
-    setOtpValues(["", "", "", ""]);
-    setOtpTimer(59);
-    setPreviousView(origin);
+    try {
+      const response = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: targetEmail })
+      });
+      const data = await response.json();
 
-    // Show a neat notification toast containing the OTP code
-    setShowOtpNotification(true);
-    setTimeout(() => {
-      // Auto-dismiss after 12 seconds
-      setShowOtpNotification(false);
-    }, 12000);
+      if (!response.ok || !data.success) {
+        setErrorMsg(data.error || "Impossible d'envoyer le code OTP.");
+        setIsLoadingOtp(false);
+        return;
+      }
 
-    setActiveView("otp");
+      setOtpValues(["", "", "", "", "", ""]);
+      setOtpTimer(59);
+      setPreviousView(origin);
+
+      if (data.isMocked) {
+        setIsMockOtp(true);
+        setGeneratedOtp(data.code);
+        setShowOtpNotification(true);
+        setTimeout(() => {
+          setShowOtpNotification(false);
+        }, 15000);
+      } else {
+        setIsMockOtp(false);
+        setGeneratedOtp("");
+        // Show email sent notification
+        setShowOtpNotification(true);
+        setTimeout(() => {
+          setShowOtpNotification(false);
+        }, 15000);
+      }
+
+      setActiveView("otp");
+    } catch (err) {
+      console.error("Error sending OTP:", err);
+      setErrorMsg("Erreur réseau lors de l'envoi du code.");
+    } finally {
+      setIsLoadingOtp(false);
+    }
   };
 
   const handleOtpChange = (index: number, value: string) => {
@@ -149,7 +180,7 @@ export function LoginPage({
     setOtpValues(newOtp);
 
     // Auto focus next box
-    if (value && index < 3) {
+    if (value && index < 5) {
       const nextInput = document.getElementById(`otp-input-${index + 1}`);
       nextInput?.focus();
     }
@@ -217,41 +248,59 @@ export function LoginPage({
     }
   };
 
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
+    setIsVerifyingOtp(true);
 
     const enteredCode = otpValues.join("");
-    if (enteredCode.length < 4) {
-      setErrorMsg("Veuillez remplir les 4 chiffres du code de validation.");
+    if (enteredCode.length < 6) {
+      setErrorMsg("Veuillez remplir les 6 chiffres du code de validation.");
+      setIsVerifyingOtp(false);
       return;
     }
 
-    // Friendly testing experience: allow any code or check the generated one
-    if (enteredCode !== generatedOtp && enteredCode !== "1234") {
-      setErrorMsg("Code de validation incorrect. Veuillez saisir le code affiché dans la notification (ou 1234).");
-      return;
-    }
+    try {
+      const response = await fetch("/api/auth/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), code: enteredCode })
+      });
+      const data = await response.json();
 
-    // Success transition
-    setShowOtpNotification(false);
+      if (!response.ok || !data.success) {
+        setErrorMsg(data.error || "Code de validation incorrect.");
+        setIsVerifyingOtp(false);
+        return;
+      }
 
-    if (previousView === "register") {
-      onSuccess(email.trim().toLowerCase(), `${firstName.trim()} ${lastName.trim()}`, selectedAvatar);
-    } else if (previousView === "login") {
-      const inferredName = email.split("@")[0];
-      const displayName = inferredName.charAt(0).toUpperCase() + inferredName.slice(1);
+      // Success transition
+      setShowOtpNotification(false);
 
-      let autoAvatar = selectedAvatar;
-      if (email.includes("jean")) autoAvatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop";
-      else if (email.includes("marc")) autoAvatar = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop";
-      else if (email.includes("pierre")) autoAvatar = "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop";
-      else if (email.includes("sophie")) autoAvatar = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop";
+      if (previousView === "register") {
+        onSuccess(email.trim().toLowerCase(), `${firstName.trim()} ${lastName.trim()}`, selectedAvatar);
+      } else if (previousView === "login") {
+        const inferredName = email.split("@")[0];
+        const displayName = inferredName.charAt(0).toUpperCase() + inferredName.slice(1);
 
-      onSuccess(email.trim().toLowerCase(), displayName, autoAvatar);
-    } else if (previousView === "forgot_password") {
-      setSuccessMsg("Votre mot de passe a été réinitialisé avec succès ! Vous pouvez maintenant vous connecter.");
-      setActiveView("login");
+        let autoAvatar = selectedAvatar;
+        if (email.includes("jean")) autoAvatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop";
+        else if (email.includes("marc")) autoAvatar = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop";
+        else if (email.includes("pierre")) autoAvatar = "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop";
+        else if (email.includes("sophie")) autoAvatar = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop";
+
+        onSuccess(email.trim().toLowerCase(), displayName, autoAvatar);
+      } else if (previousView === "forgot_password") {
+        setSuccessMsg("Votre mot de passe a été réinitialisé avec succès ! Vous pouvez maintenant vous connecter.");
+        setActiveView("login");
+      }
+    } catch (err) {
+      console.error("Error verifying OTP:", err);
+      setErrorMsg("Erreur réseau lors de la vérification.");
+    } finally {
+      setIsVerifyingOtp(false);
     }
   };
 
@@ -324,8 +373,17 @@ export function LoginPage({
                 <div className="flex items-center gap-2.5">
                   <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
                   <div className="leading-tight">
-                    <span className="font-extrabold block text-[9.5px] tracking-wider text-emerald-800 font-mono uppercase">🔑 CODE OTP DE DÉMONSTRATION</span>
-                    <span className="text-[11px] text-stone-850 font-mono">Saisissez le code : <strong className="text-emerald-700 text-[13px] font-black tracking-widest">{generatedOtp}</strong></span>
+                    {isMockOtp ? (
+                      <>
+                        <span className="font-extrabold block text-[9.5px] tracking-wider text-emerald-800 font-mono uppercase">🔑 CODE OTP DE DÉMONSTRATION</span>
+                        <span className="text-[11px] text-stone-850 font-mono">Saisissez le code : <strong className="text-emerald-700 text-[13px] font-black tracking-widest">{generatedOtp}</strong></span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-extrabold block text-[9.5px] tracking-wider text-emerald-800 font-mono uppercase">📧 CODE OTP ENVOYÉ</span>
+                        <span className="text-[11px] text-stone-850 font-mono">Un vrai code de validation à 6 chiffres a été envoyé à votre adresse e-mail.</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <button type="button" onClick={() => setShowOtpNotification(false)} className="text-emerald-800 hover:text-emerald-950 text-xs font-black p-1">✕</button>
@@ -420,9 +478,10 @@ export function LoginPage({
 
                       <button
                         type="submit"
-                        className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3.5 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer mt-2"
+                        disabled={isLoadingOtp}
+                        className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3.5 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer mt-2 disabled:opacity-50"
                       >
-                        Continuer
+                        {isLoadingOtp ? "Envoi du code..." : "Continuer"}
                       </button>
                     </form>
 
@@ -689,9 +748,10 @@ export function LoginPage({
 
                       <button
                         type="submit"
-                        className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer"
+                        disabled={isLoadingOtp}
+                        className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
                       >
-                        Confirmer
+                        {isLoadingOtp ? "Envoi du code..." : "Confirmer"}
                       </button>
                     </form>
                   </motion.div>
@@ -723,8 +783,8 @@ export function LoginPage({
 
                     <form onSubmit={handleVerifyOtp} className="space-y-6">
 
-                      {/* OTP Inputs Layout strictly matching Image 3 */}
-                      <div className="flex justify-center gap-3.5 py-2">
+                      {/* OTP Inputs Layout strictly matching Image 3 (Updated to 6 digits) */}
+                      <div className="flex justify-center gap-1.5 sm:gap-2.5 py-2">
                         {otpValues.map((digit, index) => (
                           <input
                             key={index}
@@ -736,7 +796,7 @@ export function LoginPage({
                             value={digit}
                             onChange={(e) => handleOtpChange(index, e.target.value)}
                             onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                            className="w-12 h-14 sm:w-14 sm:h-16 text-center text-xl sm:text-2xl font-bold border border-stone-250 rounded-xl bg-stone-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-stone-900 shadow-3xs"
+                            className="w-10 h-12 sm:w-12 sm:h-14 text-center text-lg sm:text-xl font-bold border border-stone-250 rounded-xl bg-stone-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-stone-900 shadow-3xs"
                             required
                           />
                         ))}
@@ -788,9 +848,10 @@ export function LoginPage({
 
                       <button
                         type="submit"
-                        className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3.5 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer"
+                        disabled={isVerifyingOtp}
+                        className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3.5 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
                       >
-                        Confirmer
+                        {isVerifyingOtp ? "Vérification..." : "Confirmer"}
                       </button>
                     </form>
                   </motion.div>
@@ -837,9 +898,10 @@ export function LoginPage({
 
                       <button
                         type="submit"
-                        className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3.5 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer mt-1"
+                        disabled={isLoadingOtp}
+                        className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3.5 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer mt-1 disabled:opacity-50"
                       >
-                        Confirmer
+                        {isLoadingOtp ? "Envoi du code..." : "Confirmer"}
                       </button>
                     </form>
                   </motion.div>
