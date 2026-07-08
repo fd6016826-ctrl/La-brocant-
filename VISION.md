@@ -66,6 +66,7 @@ Dans notre environnement local de développement et de test (sandboxing/hors-lig
 ---
 
 ## 4. Statut Actuel du Projet
+* **GitHub Repository :** Code source publié et synchronisé avec succès sur [github.com/fd6016826-ctrl/La-brocant-](https://github.com/fd6016826-ctrl/La-brocant-).
 * **Serveur de développement :** Actif et fonctionnel sur `http://localhost:3000`.
 * **Publication d'annonces :** Entièrement opérationnelle. Le test de création d'une annonce (*Vélo vintage Peugeot* à 150 €) a été validé avec succès.
 * **Persistance :** Les données locales sont enregistrées en temps réel dans `local_db.json` au format attendu par le client React.
