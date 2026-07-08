@@ -114,3 +114,7 @@ Pour valider et profiter de ces changements, voici ce que vous devez faire :
 4. **Nettoyage des Anciens Émoticônes de Profil (emojiMap) :**
    - L'ancien mappage statique `emojiMap` (qui associait des icônes d'animaux 🦊, 🦉, 🦁, 🐱 à des photos Unsplash) a été complètement supprimé de `src/App.tsx` et `AccountManagementModal.tsx`.
    - L'application utilise dorénavant directement les images d'avatars choisies (ou le composant d'image par défaut) lors de la création ou de l'affichage d'un compte.
+
+5. **Résolution du Chevauchement Mobile (Responsivité) :**
+   - Le menu de navigation flottant horizontal du bas de l'écran se cache désormais automatiquement dès qu'un modal s'ouvre (création d'annonce, création de recherche citoyenne, profil, upgrade, connexion) ou lorsqu'une discussion de messagerie active est ouverte sur mobile.
+   - Cela élimine définitivement les chevauchements entre le menu horizontal et les boutons de validation ("Publier l'annonce maintenant", etc.), garantissant une utilisation fluide et ergonomique sur smartphone.
