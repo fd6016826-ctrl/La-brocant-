@@ -118,3 +118,10 @@ Pour valider et profiter de ces changements, voici ce que vous devez faire :
 5. **Résolution du Chevauchement Mobile (Responsivité) :**
    - Le menu de navigation flottant horizontal du bas de l'écran se cache désormais automatiquement dès qu'un modal s'ouvre (création d'annonce, création de recherche citoyenne, profil, upgrade, connexion) ou lorsqu'une discussion de messagerie active est ouverte sur mobile.
    - Cela élimine définitivement les chevauchements entre le menu horizontal et les boutons de validation ("Publier l'annonce maintenant", etc.), garantissant une utilisation fluide et ergonomique sur smartphone.
+
+6. **Installation des Bibliothèques Supabase :**
+   - Installation des paquets officiels `@supabase/supabase-js` et `@supabase/ssr` pour supporter les liaisons de bases de données et les fonctionnalités côté serveur (Server-Side Rendering).
+
+7. **Script de Création des Tables Supabase (SQL) :**
+   - Création du fichier [supabase_schema.sql](file:///c:/Users/bmd/Documents/brocant%20achat%20et%2520vente/supabase_schema.sql) à la racine du projet contenant le script de création de toutes les tables (`profiles`, `listings`, `demands`, `chats`) et les règles de sécurité associées (RLS), prêt à être exécuté dans l'éditeur SQL de Supabase.
+
