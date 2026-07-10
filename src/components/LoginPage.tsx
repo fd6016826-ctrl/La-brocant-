@@ -261,7 +261,13 @@ export function LoginPage({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: email.trim(), password })
         });
-        const data = await response.json();
+        let data: any = {};
+        try {
+          data = await response.json();
+        } catch {
+          setErrorMsg(`Erreur serveur (HTTP ${response.status}) — réponse invalide du serveur.`);
+          return;
+        }
         if (!response.ok || !data.success) {
           setErrorMsg(data.error || "Email ou mot de passe incorrect.");
           return;
@@ -273,8 +279,8 @@ export function LoginPage({
           data.user.name,
           data.user.avatar || DEFAULT_AVATAR_PLACEHOLDER
         );
-      } catch (err) {
-        setErrorMsg("Erreur réseau lors de la connexion.");
+      } catch (err: any) {
+        setErrorMsg("Erreur réseau lors de la connexion: " + (err?.message || "connexion impossible"));
       } finally {
         setIsSubmitting(false);
       }
