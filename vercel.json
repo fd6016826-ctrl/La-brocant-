@@ -1,13 +1,14 @@
 {
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index.ts"
-    }
+    { "source": "/api/(.*)", "destination": "/api/index.ts" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "functions": {
     "api/index.ts": {
-      "includeFiles": "server.cjs"
+      "memory": 1024,
+      "maxDuration": 30
     }
   }
 }
