@@ -715,30 +715,42 @@ const UPLOADS_DIR = path.join(localDirname, "uploads");
 
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-async function start() {
-  // Test dynamique de la connexion Supabase
+const app = express();
+
+let supabaseChecked = false;
+async function checkSupabaseConnection() {
+  if (supabaseChecked) return;
   try {
-    const { data, error } = await supabaseClient.from("profiles").select("email").limit(1);
+    const { error } = await supabaseClient.from("profiles").select("email").limit(1);
     if (error) {
-      console.warn("[Brocante] Échec de la connexion Supabase (vérification table profiles). Utilisation de la base de données locale en fallback. Erreur :", error.message);
+      console.warn("[Brocante] Échec de la connexion Supabase (profiles absent). Fallback local actif.");
       useLocalDb = true;
     } else {
       console.log("[Brocante] Connexion à Supabase réussie ! Base de données en ligne active.");
       useLocalDb = false;
     }
   } catch (err: any) {
-    console.warn("[Brocante] Exception lors du test de connexion Supabase. Utilisation de la base de données locale en fallback. Erreur :", err.message || err);
+    console.warn("[Brocante] Exception lors du test de connexion Supabase. Fallback local actif. Erreur :", err.message || err);
     useLocalDb = true;
   }
+  supabaseChecked = true;
+}
 
-  const app = express();
+// Global middleware to lazily verify Supabase connectivity
+app.use(async (req, res, next) => {
+  await checkSupabaseConnection();
+  next();
+});
 
-  // Middleware to support file uploading inside JSON requests
-  app.use(express.json({ limit: "15mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+// Middleware to support file uploading inside JSON requests
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
-  // Static directory for uploaded product files
-  app.use("/uploads", express.static(UPLOADS_DIR));
+// Static directory for uploaded product files
+app.use("/uploads", express.static(UPLOADS_DIR));
+
+// Start function for local development server only
+async function start() {
 
   // --- API DEFINITIONS ---
 
@@ -2691,25 +2703,28 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     }
   });
 
-  // --- INTEGRATION OF VITE AS DEV OR PROD MIDDLEWARE ---
+  // --- INTEGRATION OF VITE AS DEV OR PROD MIDDLEWARE (Skip on Vercel Serverless) ---
+  if (!process.env.VERCEL) {
+    if (process.env.NODE_ENV !== "production") {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
 
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`[Brocante Server] Running at http://localhost:${PORT}`);
     });
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Brocante Server] Running at http://localhost:${PORT}`);
-  });
 }
 
 start();
+
+export default app;
