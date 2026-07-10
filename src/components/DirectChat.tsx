@@ -22,6 +22,7 @@ interface DirectChatProps {
   currency?: Currency;
   onAddNotification?: (title: string, message: string, type: "system" | "offer" | "neighbor" | "transaction", customId?: string) => void;
   onNavigateToNotifications?: () => void;
+  sessionToken?: string;
 }
 
 interface ThreadAvatarProps {
@@ -79,6 +80,7 @@ export const DirectChat: React.FC<DirectChatProps> = ({
   currency,
   onAddNotification,
   onNavigateToNotifications,
+  sessionToken,
 }) => {
   const chatCurrency = currency || CURRENCIES[0];
   const [typedMessage, setTypedMessage] = useState("");
@@ -160,6 +162,9 @@ export const DirectChat: React.FC<DirectChatProps> = ({
     try {
       const res = await fetch(`/api/chats/${activeThread.id}/messages/${messageId}`, {
         method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${sessionToken}`
+        }
       });
       if (res.ok) {
         onRefresh();
@@ -345,7 +350,10 @@ export const DirectChat: React.FC<DirectChatProps> = ({
     try {
       const res = await fetch(`/api/listings/${activeThread.listingId}/purchase`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionToken}`
+        },
         body: JSON.stringify({ 
           buyerEmail: currentUserEmail, 
           buyerName: currentUserName,
@@ -377,6 +385,9 @@ export const DirectChat: React.FC<DirectChatProps> = ({
     try {
       const res = await fetch(`/api/listings/${activeThread.listingId}/sell`, {
         method: "POST",
+        headers: {
+          "Authorization": `Bearer ${sessionToken}`
+        }
       });
       if (res.ok) {
         // Automatically send a system message in the chat

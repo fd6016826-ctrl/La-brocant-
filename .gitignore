@@ -11,3 +11,4 @@ server.cjs
 .system_generated
 .tempmediaStorage
 uploads
+local_db.json

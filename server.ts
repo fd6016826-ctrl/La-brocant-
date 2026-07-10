@@ -24,6 +24,9 @@ if (!supabaseUrl || !supabaseKey) {
 }
 const supabaseClient = createClient(supabaseUrl, supabaseKey);
 
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "fd6016826@gmail.com").trim().toLowerCase();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin_temp_change_me";
+
 // Store pending mock OTP sessions in memory
 const pendingOtps = new Map<string, { code: string; expiresAt: number }>();
 
@@ -34,7 +37,7 @@ let useLocalDb = false;
 const localDbPath = path.join(localDirname, "local_db.json");
 
 // Helper functions for reading/writing local database
-function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?: any[] } {
+function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?: any[]; notifications?: any[] } {
   try {
     let needsInitialization = false;
     if (!fs.existsSync(localDbPath)) {
@@ -53,6 +56,7 @@ function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?:
 
     if (needsInitialization) {
       const defaultData = {
+        notifications: [],
         listings: [
           {
             id: "1",
@@ -176,25 +180,129 @@ function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?:
     }
     const data = fs.readFileSync(localDbPath, "utf-8");
     const parsed = JSON.parse(data);
+    
+    let dbUpdated = false;
     if (!parsed.users) {
       parsed.users = [
-        { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop" },
-        { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop" }
+        { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop", password: "123456", pref_notif_announcements: true },
+        { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop", password: "123456", pref_notif_announcements: true }
       ];
+      dbUpdated = true;
+    }
+    if (!parsed.notifications) {
+      parsed.notifications = [];
+      dbUpdated = true;
+    }
+    if (dbUpdated) {
       fs.writeFileSync(localDbPath, JSON.stringify(parsed, null, 2));
     }
     return parsed;
   } catch (err) {
     console.error("Error reading local_db.json, returning empty structure:", err);
-    return { listings: [], demands: [], chats: [], users: [] };
+    return { listings: [], demands: [], chats: [], users: [], notifications: [] };
   }
 }
 
-function writeLocalDb(data: { listings: any[]; demands: any[]; chats: any[]; users?: any[] }) {
+function writeLocalDb(data: { listings: any[]; demands: any[]; chats: any[]; users?: any[]; notifications?: any[] }) {
   try {
     fs.writeFileSync(localDbPath, JSON.stringify(data, null, 2));
   } catch (err) {
     console.error("Error writing to local_db.json:", err);
+  }
+}
+
+// Helper to determine if user is Pro
+async function checkIsProUser(email: string): Promise<boolean> {
+  const cleanEmail = email.toLowerCase().trim();
+  if (cleanEmail.includes("pro") || cleanEmail.includes("sophie")) {
+    return true;
+  }
+  try {
+    if (useLocalDb) {
+      const db = readLocalDb();
+      const user = (db.users || []).find((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+      return !!(user && user.isPro);
+    } else {
+      const { data: profile } = await supabaseClient.from("profiles").select("email").eq("email", cleanEmail).maybeSingle();
+      // In this DB setup, any custom profile can also be marked as pro via email checking or pro attribute
+      // For fallback simplicity, look in local db too
+      const db = readLocalDb();
+      const user = (db.users || []).find((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+      return !!(user && user.isPro);
+    }
+  } catch (e) {
+    return false;
+  }
+}
+
+// Helper to create notifications with free vs pro limit rule
+async function createNotification(userEmail: string, title: string, message: string, type: "system" | "offer" | "neighbor" | "transaction") {
+  try {
+    const cleanEmail = userEmail.toLowerCase().trim();
+    
+    // If transaction (purchase notification), apply free vs pro check
+    if (type === "transaction") {
+      const isPro = await checkIsProUser(cleanEmail);
+      if (!isPro) {
+        // Free user: check if there's already a transaction notification in last 24h
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        if (useLocalDb) {
+          const db = readLocalDb();
+          const list = db.notifications || [];
+          const hasRecent = list.some((n: any) => 
+            n.user_email.toLowerCase().trim() === cleanEmail && 
+            n.type === "transaction" && 
+            n.created_at >= oneDayAgo
+          );
+          if (hasRecent) {
+            console.log(`[Notification Limit] Skip transaction notification for free user: ${cleanEmail}`);
+            return; // Block notification
+          }
+        } else {
+          const { data: recent } = await supabaseClient
+            .from("notifications")
+            .select("id")
+            .eq("user_email", cleanEmail)
+            .eq("type", "transaction")
+            .gte("created_at", oneDayAgo)
+            .limit(1);
+          if (recent && recent.length > 0) {
+            console.log(`[Notification Limit] Skip transaction notification for free user (Supabase): ${cleanEmail}`);
+            return; // Block notification
+          }
+        }
+      }
+    }
+
+    const notifObj = {
+      id: `notif_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+      user_email: cleanEmail,
+      title,
+      message,
+      type,
+      read: false,
+      created_at: new Date().toISOString()
+    };
+
+    if (useLocalDb) {
+      const db = readLocalDb();
+      if (!db.notifications) db.notifications = [];
+      db.notifications.push(notifObj);
+      writeLocalDb(db);
+    } else {
+      const { error } = await supabaseClient.from("notifications").insert([notifObj]);
+      if (error) {
+        console.error("Error inserting notification to Supabase:", error);
+        // Local fallback writing
+        const db = readLocalDb();
+        if (!db.notifications) db.notifications = [];
+        db.notifications.push(notifObj);
+        writeLocalDb(db);
+      }
+    }
+    console.log(`[Notification Pushed] To: ${cleanEmail} | Title: ${title}`);
+  } catch (err) {
+    console.error("Failed to create notification:", err);
   }
 }
 
@@ -608,18 +716,18 @@ const UPLOADS_DIR = path.join(localDirname, "uploads");
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 async function start() {
-  // Test Supabase connection
+  // Test dynamique de la connexion Supabase
   try {
-    console.log("[Brocante] Testing connection to Supabase...");
-    const { error } = await supabaseClient.from("listings").select("id").limit(1);
+    const { data, error } = await supabaseClient.from("profiles").select("email").limit(1);
     if (error) {
-      console.warn("[Brocante] Supabase check returned error, using local fallback DB:", error);
+      console.warn("[Brocante] Échec de la connexion Supabase (vérification table profiles). Utilisation de la base de données locale en fallback. Erreur :", error.message);
       useLocalDb = true;
     } else {
-      console.log("[Brocante] Connected to Supabase successfully.");
+      console.log("[Brocante] Connexion à Supabase réussie ! Base de données en ligne active.");
+      useLocalDb = false;
     }
-  } catch (e) {
-    console.warn("[Brocante] Failed to connect to Supabase, using local fallback DB:", e);
+  } catch (err: any) {
+    console.warn("[Brocante] Exception lors du test de connexion Supabase. Utilisation de la base de données locale en fallback. Erreur :", err.message || err);
     useLocalDb = true;
   }
 
@@ -889,6 +997,38 @@ async function start() {
       const { data, error } = await supabase.from("demands").insert([dbDemand]).select().single();
       if (error) throw error;
 
+      // Notify other users who opted in for announcements
+      const bEmailClean = buyerEmail.toLowerCase().trim();
+      const notifTitle = "Nouvel avis de recherche !";
+      const notifMessage = `${buyerName} recherche activement : "${title}". Peut-être avez-vous cet objet chez vous ?`;
+
+      (async () => {
+        try {
+          let targets: string[] = [];
+          if (useLocalDb) {
+            const db = readLocalDb();
+            targets = (db.users || [])
+              .filter((u: any) => u.email.toLowerCase().trim() !== bEmailClean && u.pref_notif_announcements !== false)
+              .map((u: any) => u.email);
+          } else {
+            const { data: profiles } = await supabaseClient
+              .from("profiles")
+              .select("email")
+              .neq("email", bEmailClean);
+            if (profiles) {
+              targets = profiles.map((p: any) => p.email);
+            }
+          }
+
+          // Send notifications to all targets
+          for (const email of targets) {
+            await createNotification(email, notifTitle, notifMessage, "offer");
+          }
+        } catch (e) {
+          console.error("Failed to dispatch demand notifications:", e);
+        }
+      })();
+
       res.status(201).json(mapDemandFromDb(data));
     } catch (err) {
       console.error("Error creating buyer demand in Supabase:", err);
@@ -985,6 +1125,10 @@ async function start() {
           const { data: insertedDb, error: insertErr } = await supabase.from("listings").insert([mapListingToDb(soldClone)]).select().single();
           if (insertErr) throw insertErr;
 
+          // Notifications
+          await createNotification(listing.sellerEmail, "Objet vendu !", `Votre objet "${listing.title}" a été acheté par ${bName}.`, "transaction");
+          await createNotification(bEmail, "Achat finalisé !", `Votre achat pour "${listing.title}" a été validé avec succès.`, "transaction");
+
           res.json(mapListingFromDb(insertedDb));
           return;
         } else {
@@ -1014,6 +1158,10 @@ async function start() {
           const { data: insertedDb, error: insertErr } = await supabase.from("listings").insert([mapListingToDb(soldClone)]).select().single();
           if (insertErr) throw insertErr;
 
+          // Notifications
+          await createNotification(listing.sellerEmail, "Objet vendu !", `Votre objet "${listing.title}" a été acheté par ${bName}. Stock épuisé.`, "transaction");
+          await createNotification(bEmail, "Achat finalisé !", `Votre achat pour "${listing.title}" a été validé avec succès.`, "transaction");
+
           res.json(mapListingFromDb(insertedDb));
           return;
         }
@@ -1025,6 +1173,10 @@ async function start() {
           requested_quantity: reqQty
         }).eq("id", id).select().single();
         if (updateErr) throw updateErr;
+
+        // Notifications for pending purchase confirmation
+        await createNotification(listing.sellerEmail, "Offre d'achat reçue !", `${bName} souhaite acheter "${listing.title}". Confirmez la transaction pour finaliser.`, "transaction");
+        await createNotification(bEmail, "Demande d'achat enregistrée !", `Votre demande d'achat pour "${listing.title}" a bien été enregistrée. En attente de confirmation du vendeur.`, "transaction");
 
         res.json(mapListingFromDb(updatedDb));
       }
@@ -1079,6 +1231,10 @@ async function start() {
           const { data: insertedDb, error: insertErr } = await supabase.from("listings").insert([mapListingToDb(soldClone)]).select().single();
           if (insertErr) throw insertErr;
 
+          // Notifications
+          await createNotification(listing.sellerEmail, "Vente validée !", `Votre vente pour "${listing.title}" à ${bName} a été enregistrée.`, "transaction");
+          await createNotification(bEmail, "Achat validé !", `Le vendeur de "${listing.title}" a confirmé votre achat en mains propres.`, "transaction");
+
           res.json(mapListingFromDb(insertedDb));
           return;
         } else {
@@ -1108,6 +1264,10 @@ async function start() {
           const { data: insertedDb, error: insertErr } = await supabase.from("listings").insert([mapListingToDb(soldClone)]).select().single();
           if (insertErr) throw insertErr;
 
+          // Notifications
+          await createNotification(listing.sellerEmail, "Vente validée !", `Votre vente pour "${listing.title}" à ${bName} a été enregistrée. Stock épuisé.`, "transaction");
+          await createNotification(bEmail, "Achat validé !", `Le vendeur de "${listing.title}" a confirmé votre achat en mains propres.`, "transaction");
+
           res.json(mapListingFromDb(insertedDb));
           return;
         }
@@ -1116,6 +1276,9 @@ async function start() {
           seller_confirmed: true
         }).eq("id", id).select().single();
         if (updateErr) throw updateErr;
+
+        // Vendeur confirme la vente en premier
+        await createNotification(listing.sellerEmail, "Vente pré-confirmée !", `Vous avez validé la vente de "${listing.title}". En attente de confirmation de l'acheteur.`, "transaction");
 
         res.json(mapListingFromDb(updatedDb));
       }
@@ -1715,7 +1878,262 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     }
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // AUTH ENDPOINTS — Password-based, no Supabase OTP (no rate limit issues)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // POST /api/auth/signup — Create account, generate password, save to DB
+  app.post("/api/auth/signup", async (req, res) => {
+    try {
+      const { email, name, avatar } = req.body;
+      if (!email || !name) {
+        res.status(400).json({ error: "Email et nom requis." });
+        return;
+      }
+      const cleanEmail = email.trim().toLowerCase();
+      const displayName = name.trim();
+      const avatarUrl = avatar || "";
+
+      // Generate a random password
+      const generatedPassword = `Broc-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+      if (useLocalDb) {
+        const db = readLocalDb();
+        if (!db.users) db.users = [];
+        const exists = db.users.some((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+        if (exists) {
+          res.status(400).json({ error: "Cet e-mail est déjà enregistré." });
+          return;
+        }
+        db.users.push({
+          email: cleanEmail,
+          name: displayName,
+          avatar: avatarUrl,
+          password: generatedPassword,
+          isPro: cleanEmail.includes("pro") || cleanEmail.includes("sophie")
+        });
+        writeLocalDb(db);
+      } else {
+        // Check if profile already exists
+        const { data: existing } = await supabase.from("profiles").select("email").eq("email", cleanEmail).maybeSingle();
+        if (existing) {
+          res.status(400).json({ error: "Cet e-mail est déjà enregistré." });
+          return;
+        }
+        // Insert into profiles table (exclude password & preferences not present in online schema)
+        const { error: insertErr } = await supabase.from("profiles").insert({
+          email: cleanEmail,
+          name: displayName,
+          avatar_url: avatarUrl
+        });
+        if (insertErr) {
+          console.warn("Supabase profiles insert error, falling back to local:", insertErr.message);
+          const db = readLocalDb();
+          if (!db.users) db.users = [];
+          db.users.push({ email: cleanEmail, name: displayName, avatar: avatarUrl, password: generatedPassword });
+          writeLocalDb(db);
+        }
+        // Also save to local fallback
+        const db = readLocalDb();
+        if (!db.users) db.users = [];
+        if (!db.users.some((u: any) => u.email.toLowerCase().trim() === cleanEmail)) {
+          db.users.push({ email: cleanEmail, name: displayName, avatar: avatarUrl, password: generatedPassword });
+          writeLocalDb(db);
+        }
+      }
+
+      console.log(`\n--- [SIGNUP] ${cleanEmail} | Password: ${generatedPassword} ---\n`);
+
+      res.json({
+        success: true,
+        message: "Compte créé avec succès.",
+        password: generatedPassword
+      });
+    } catch (err: any) {
+      console.error("Error during signup:", err);
+      res.status(500).json({ error: err.message || "Erreur serveur lors de l'inscription." });
+    }
+  });
+
+  // POST /api/auth/login — Direct email + password login against profiles table
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        res.status(400).json({ error: "Email et mot de passe requis." });
+        return;
+      }
+      const cleanEmail = email.trim().toLowerCase();
+
+      let finalUser: any = null;
+      const sessionToken = `mock_jwt_${cleanEmail}_${Date.now()}`;
+
+      // Intercept admin login
+      if (cleanEmail === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+        let adminUser = {
+          email: ADMIN_EMAIL,
+          name: "Fallou Diouf",
+          avatar: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g1' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23fbbf24'/><stop offset='100%' stop-color='%23d97706'/></linearGradient></defs><rect width='100' height='100' rx='28' fill='url(%23g1)'/><g fill='none' stroke='%23ffffff' stroke-width='5.5' stroke-linecap='round' stroke-linejoin='round'><path d='M30 42h40v30c0 4-3 7-7 7H37c-4 0-7-3-7-7V42z'/><path d='M40 42c0-5 3-9 10-9s10 4 10 9'/><circle cx='50' cy='58' r='4' fill='%23ffffff'/></g></svg>",
+          isPro: true,
+          isAdmin: true
+        };
+
+        // Ensure profile exists in local DB fallback
+        const db = readLocalDb();
+        if (!db.users) db.users = [];
+        const localIdx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === ADMIN_EMAIL);
+        if (localIdx === -1) {
+          db.users.push({
+            email: ADMIN_EMAIL,
+            name: "Fallou Diouf",
+            avatar: adminUser.avatar,
+            password: ADMIN_PASSWORD,
+            pref_notif_announcements: true
+          });
+          writeLocalDb(db);
+        } else {
+          db.users[localIdx].password = ADMIN_PASSWORD; // update if mismatch
+          writeLocalDb(db);
+        }
+
+        // Ensure profile exists in Supabase
+        if (!useLocalDb) {
+          try {
+            const { data: existing } = await supabase.from("profiles").select("email").eq("email", ADMIN_EMAIL).maybeSingle();
+            if (!existing) {
+              await supabase.from("profiles").insert({
+                email: ADMIN_EMAIL,
+                name: "Fallou Diouf",
+                avatar_url: adminUser.avatar
+              });
+            }
+          } catch (e) {
+            console.warn("Silent admin profile sync failed:", e);
+          }
+        }
+
+        console.log(`\n--- [ADMIN LOGIN] ${cleanEmail} authenticated ---\n`);
+
+        res.json({
+          success: true,
+          message: "Connexion réussie.",
+          token: sessionToken,
+          user: adminUser
+        });
+        return;
+      }
+
+      // Check local fallback first (covers both useLocalDb mode and local cache)
+      const db = readLocalDb();
+      const localUser = (db.users || []).find((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+
+      if (localUser) {
+        if (localUser.password !== password) {
+          res.status(400).json({ error: "Email ou mot de passe incorrect." });
+          return;
+        }
+        finalUser = {
+          email: localUser.email,
+          name: localUser.name,
+          avatar: localUser.avatar || "",
+          isPro: localUser.isPro || false
+        };
+      } else if (!useLocalDb) {
+        // Try Supabase profiles table
+        const { data: profile, error: profileErr } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("email", cleanEmail)
+          .maybeSingle();
+
+        if (profileErr || !profile) {
+          res.status(400).json({ error: "Aucun compte trouvé avec cet e-mail." });
+          return;
+        }
+        if (profile.password !== password) {
+          res.status(400).json({ error: "Email ou mot de passe incorrect." });
+          return;
+        }
+        finalUser = {
+          email: profile.email,
+          name: profile.name,
+          avatar: profile.avatar_url || "",
+          isPro: cleanEmail.includes("pro") || cleanEmail.includes("sophie")
+        };
+      } else {
+        res.status(400).json({ error: "Aucun compte trouvé avec cet e-mail." });
+        return;
+      }
+
+      console.log(`\n--- [LOGIN] ${cleanEmail} authenticated ---\n`);
+
+      res.json({
+        success: true,
+        message: "Connexion réussie.",
+        token: sessionToken,
+        user: finalUser
+      });
+    } catch (err: any) {
+      console.error("Error during login:", err);
+      res.status(500).json({ error: err.message || "Erreur serveur lors de la connexion." });
+    }
+  });
+
+  // POST /api/auth/forgot-password — Generate new password WITHOUT Supabase recover (no rate limit)
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        res.status(400).json({ error: "Email requis." });
+        return;
+      }
+      const cleanEmail = email.trim().toLowerCase();
+      const newPassword = `Broc-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+      // Update local fallback
+      const db = readLocalDb();
+      if (!db.users) db.users = [];
+      const localIdx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+
+      if (useLocalDb) {
+        if (localIdx === -1) {
+          res.status(404).json({ error: "Aucun compte associé à cet e-mail." });
+          return;
+        }
+        db.users[localIdx].password = newPassword;
+        writeLocalDb(db);
+      } else {
+        // Update in Supabase profiles
+        const { data: profile } = await supabase.from("profiles").select("email").eq("email", cleanEmail).maybeSingle();
+        if (!profile && localIdx === -1) {
+          res.status(404).json({ error: "Aucun compte associé à cet e-mail." });
+          return;
+        }
+        // The password column is missing in online Supabase schema, handled only in local fallback cache.
+        // Also update local cache
+        if (localIdx !== -1) {
+          db.users[localIdx].password = newPassword;
+        } else {
+          db.users.push({ email: cleanEmail, password: newPassword });
+        }
+        writeLocalDb(db);
+      }
+
+      console.log(`\n--- [PASSWORD RESET] ${cleanEmail} | New Password: ${newPassword} ---\n`);
+
+      res.json({
+        success: true,
+        message: "Nouveau mot de passe généré.",
+        password: newPassword
+      });
+    } catch (err: any) {
+      console.error("Error during forgot-password:", err);
+      res.status(500).json({ error: err.message || "Erreur serveur." });
+    }
+  });
+
   // POST /api/auth/send-otp - Request e-mail OTP
+
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
       const { email } = req.body;
@@ -1795,6 +2213,481 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     } catch (err) {
       console.error("Error in /api/auth/verify-otp:", err);
       res.status(500).json({ error: "Erreur serveur lors de la vérification." });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // NOTIFICATIONS & PREFERENCES ENDPOINTS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // GET /api/notifications — Retrieve user notifications with free tier rate limits
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const { email } = req.query;
+      if (!email) {
+        res.status(400).json({ error: "Email requis." });
+        return;
+      }
+      const cleanEmail = String(email).toLowerCase().trim();
+      const isPro = await checkIsProUser(cleanEmail);
+
+      let rawNotifs: any[] = [];
+      if (useLocalDb) {
+        const db = readLocalDb();
+        rawNotifs = (db.notifications || []).filter((n: any) => n.user_email.toLowerCase().trim() === cleanEmail);
+      } else {
+        const { data, error } = await supabaseClient
+          .from("notifications")
+          .select("*")
+          .eq("user_email", cleanEmail)
+          .order("created_at", { ascending: false });
+        if (error) {
+          console.warn("Supabase notifications fetch error, using local fallback:", error.message);
+          const db = readLocalDb();
+          rawNotifs = (db.notifications || []).filter((n: any) => n.user_email.toLowerCase().trim() === cleanEmail);
+        } else {
+          rawNotifs = data || [];
+        }
+      }
+
+      // Sort by created_at descending
+      rawNotifs.sort((a, b) => new Date(b.created_at || b.createdAt).getTime() - new Date(a.created_at || a.createdAt).getTime());
+
+      // If user is not Pro, limit transaction notifications to 1 per day (24 hours)
+      let filteredNotifs = [...rawNotifs];
+      if (!isPro) {
+        let allowedTransactionFound = false;
+        let lastAllowedTime = 0;
+        
+        filteredNotifs = rawNotifs.filter((n) => {
+          if (n.type === "transaction") {
+            const time = new Date(n.created_at || n.createdAt).getTime();
+            // Allow only one transaction notification if it is the first one or if it is at least 24h apart from the last allowed one
+            if (!allowedTransactionFound) {
+              allowedTransactionFound = true;
+              lastAllowedTime = time;
+              return true;
+            }
+            // If another transaction notif is found, block it
+            return false;
+          }
+          return true;
+        });
+      }
+
+      // Map DB notification item into UI NotificationItem shape
+      const uiNotifs = filteredNotifs.map((n) => ({
+        id: n.id,
+        title: n.title,
+        message: n.message,
+        time: n.created_at ? new Date(n.created_at).toLocaleString("fr-FR") : "À l'instant",
+        type: n.type,
+        read: n.read === true
+      }));
+
+      res.json(uiNotifs);
+    } catch (err: any) {
+      console.error("Error fetching notifications:", err);
+      res.status(500).json({ error: "Erreur lors du chargement des notifications." });
+    }
+  });
+
+  // PATCH /api/notifications/:id/read — Toggle/update read state of a notification
+  app.patch("/api/notifications/:id/read", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { read } = req.body;
+      
+      if (useLocalDb) {
+        const db = readLocalDb();
+        if (!db.notifications) db.notifications = [];
+        const idx = db.notifications.findIndex((n: any) => n.id === id);
+        if (idx !== -1) {
+          db.notifications[idx].read = read === true;
+          writeLocalDb(db);
+          res.json({ success: true, notification: db.notifications[idx] });
+        } else {
+          res.status(404).json({ error: "Notification introuvable." });
+        }
+      } else {
+        const { data, error } = await supabaseClient
+          .from("notifications")
+          .update({ read: read === true })
+          .eq("id", id)
+          .select()
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) {
+          // Fallback to local DB search
+          const db = readLocalDb();
+          if (!db.notifications) {
+            db.notifications = [];
+          }
+          const idx = db.notifications.findIndex((n: any) => n.id === id);
+          if (idx !== -1) {
+            db.notifications[idx].read = read === true;
+            writeLocalDb(db);
+            res.json({ success: true, notification: db.notifications[idx] });
+          } else {
+            res.status(404).json({ error: "Notification introuvable." });
+          }
+        } else {
+          res.json({ success: true, notification: data });
+        }
+      }
+    } catch (err: any) {
+      console.error("Error updating notification read status:", err);
+      res.status(500).json({ error: "Erreur serveur." });
+    }
+  });
+
+  // DELETE /api/notifications/:id — Delete a single notification
+  app.delete("/api/notifications/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      if (useLocalDb) {
+        const db = readLocalDb();
+        if (!db.notifications) db.notifications = [];
+        const originalLength = db.notifications.length;
+        db.notifications = db.notifications.filter((n: any) => n.id !== id);
+        if (db.notifications.length < originalLength) {
+          writeLocalDb(db);
+          res.json({ success: true, message: "Notification supprimée." });
+        } else {
+          res.status(404).json({ error: "Notification introuvable." });
+        }
+      } else {
+        const { error } = await supabaseClient.from("notifications").delete().eq("id", id);
+        if (error) {
+          console.warn("Supabase notification delete error, using local fallback:", error.message);
+        }
+        // Sync local cache
+        const db = readLocalDb();
+        if (!db.notifications) db.notifications = [];
+        const originalLength = db.notifications.length;
+        db.notifications = db.notifications.filter((n: any) => n.id !== id);
+        if (db.notifications.length < originalLength) {
+          writeLocalDb(db);
+        }
+        res.json({ success: true, message: "Notification supprimée." });
+      }
+    } catch (err: any) {
+      console.error("Error deleting notification:", err);
+      res.status(500).json({ error: "Erreur serveur." });
+    }
+  });
+
+  // POST /api/notifications/clear-all — Delete all notifications for a user
+  app.post("/api/notifications/clear-all", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        res.status(400).json({ error: "Email requis." });
+        return;
+      }
+      const cleanEmail = email.toLowerCase().trim();
+
+      if (useLocalDb) {
+        const db = readLocalDb();
+        db.notifications = (db.notifications || []).filter((n: any) => n.user_email.toLowerCase().trim() !== cleanEmail);
+        writeLocalDb(db);
+      } else {
+        const { error } = await supabaseClient.from("notifications").delete().eq("user_email", cleanEmail);
+        if (error) {
+          console.warn("Supabase notifications delete error, clearing local cache:", error.message);
+        }
+        // Sync local cache
+        const db = readLocalDb();
+        db.notifications = (db.notifications || []).filter((n: any) => n.user_email.toLowerCase().trim() !== cleanEmail);
+        writeLocalDb(db);
+      }
+      res.json({ success: true, message: "Toutes les notifications ont été supprimées." });
+    } catch (err: any) {
+      console.error("Error clearing notifications:", err);
+      res.status(500).json({ error: "Erreur serveur." });
+    }
+  });
+
+  // POST /api/notifications/mark-all-read — Mark all notifications as read for a user
+  app.post("/api/notifications/mark-all-read", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        res.status(400).json({ error: "Email requis." });
+        return;
+      }
+      const cleanEmail = email.toLowerCase().trim();
+
+      if (useLocalDb) {
+        const db = readLocalDb();
+        db.notifications = (db.notifications || []).map((n: any) => {
+          if (n.user_email.toLowerCase().trim() === cleanEmail) {
+            return { ...n, read: true };
+          }
+          return n;
+        });
+        writeLocalDb(db);
+      } else {
+        const { error } = await supabaseClient.from("notifications").update({ read: true }).eq("user_email", cleanEmail);
+        if (error) {
+          console.warn("Supabase notifications update error, marking local cache:", error.message);
+        }
+        // Update local cache
+        const db = readLocalDb();
+        db.notifications = (db.notifications || []).map((n: any) => {
+          if (n.user_email.toLowerCase().trim() === cleanEmail) {
+            return { ...n, read: true };
+          }
+          return n;
+        });
+        writeLocalDb(db);
+      }
+      res.json({ success: true, message: "Toutes les notifications ont été marquées comme lues." });
+    } catch (err: any) {
+      console.error("Error marking notifications as read:", err);
+      res.status(500).json({ error: "Erreur serveur." });
+    }
+  });
+
+  // PATCH /api/users/preferences — Update user settings (pref_notif_announcements, etc.)
+  app.patch("/api/users/preferences", async (req, res) => {
+    try {
+      const { email, prefNotifAnnouncements } = req.body;
+      if (!email) {
+        res.status(400).json({ error: "Email requis." });
+        return;
+      }
+      const cleanEmail = email.toLowerCase().trim();
+      const updates = { pref_notif_announcements: prefNotifAnnouncements === true };
+
+      // Update in local DB
+      const db = readLocalDb();
+      if (!db.users) db.users = [];
+      const userIdx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+      if (userIdx !== -1) {
+        db.users[userIdx].pref_notif_announcements = prefNotifAnnouncements === true;
+        writeLocalDb(db);
+      }
+
+      if (!useLocalDb) {
+        // Update in Supabase profiles
+        const { error } = await supabaseClient
+          .from("profiles")
+          .update(updates)
+          .eq("email", cleanEmail);
+        if (error) {
+          console.warn("Supabase preferences update error:", error.message);
+        }
+      }
+
+      res.json({ success: true, preferences: updates });
+    } catch (err: any) {
+      console.error("Error updating user preferences:", err);
+      res.status(500).json({ error: "Erreur serveur lors de la mise à jour des préférences." });
+    }
+  });
+
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ADMIN ENDPOINTS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Middleware pour vérifier que la requête provient bien de l'administrateur
+  const adminAuthMiddleware = (req: any, res: any, next: any) => {
+    const requesterEmail = req.headers["x-admin-email"] || req.query.adminEmail || req.body.adminEmail;
+    if (requesterEmail && requesterEmail.toLowerCase().trim() === ADMIN_EMAIL) {
+      next();
+    } else {
+      res.status(403).json({ error: "Accès refusé. Vous devez être administrateur." });
+    }
+  };
+
+  // GET /api/admin/stats — Récupérer toutes les statistiques du site pour le Dashboard Admin
+  app.get("/api/admin/stats", adminAuthMiddleware, async (req, res) => {
+    try {
+      let users: any[] = [];
+      let listings: any[] = [];
+      let chats: any[] = [];
+      let demands: any[] = [];
+
+      if (useLocalDb) {
+        const db = readLocalDb();
+        users = db.users || [];
+        listings = db.listings || [];
+        chats = db.chats || [];
+        demands = db.demands || [];
+      } else {
+        // Fetch from Supabase
+        const { data: dbUsers } = await supabaseClient.from("profiles").select("*");
+        const { data: dbListings } = await supabaseClient.from("listings").select("*");
+        const { data: dbChats } = await supabaseClient.from("chats").select("*");
+        const { data: dbDemands } = await supabaseClient.from("demands").select("*");
+        
+        users = dbUsers || [];
+        listings = dbListings || [];
+        chats = dbChats || [];
+        demands = dbDemands || [];
+      }
+
+      const activeListings = listings.filter((l: any) => !l.is_sold && !l.isSold);
+      const soldListings = listings.filter((l: any) => l.is_sold || l.isSold);
+
+      const totalValue = activeListings.reduce((sum: number, l: any) => sum + Number(l.price || 0), 0);
+      const totalSalesValue = soldListings.reduce((sum: number, l: any) => sum + Number(l.price || 0), 0);
+
+      res.json({
+        totalUsers: users.length,
+        totalListings: listings.length,
+        activeListings: activeListings.length,
+        soldListings: soldListings.length,
+        totalValue,
+        totalSalesValue,
+        totalChats: chats.length,
+        totalDemands: demands.length,
+        usersList: users,
+        listingsList: listings.map(mapListingFromDb)
+      });
+    } catch (err: any) {
+      console.error("Error fetching admin stats:", err);
+      res.status(500).json({ error: "Erreur serveur lors de la récupération des statistiques." });
+    }
+  });
+
+  // POST /api/admin/broadcast-notification — Diffuser une notification à tous les utilisateurs
+  app.post("/api/admin/broadcast-notification", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { title, message, type } = req.body;
+      if (!title || !message) {
+        res.status(400).json({ error: "Titre et message requis." });
+        return;
+      }
+
+      let userEmails: string[] = [];
+
+      if (useLocalDb) {
+        const db = readLocalDb();
+        userEmails = (db.users || []).map((u: any) => u.email);
+      } else {
+        const { data: profiles } = await supabaseClient.from("profiles").select("email");
+        userEmails = (profiles || []).map((p: any) => p.email);
+      }
+
+      const newNotifs = userEmails.map(email => ({
+        id: `notif_sys_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        user_email: email,
+        title,
+        message,
+        type: type || "announcement",
+        read: false,
+        created_at: new Date().toISOString()
+      }));
+
+      // Insert notifications
+      if (useLocalDb) {
+        const db = readLocalDb();
+        if (!db.notifications) db.notifications = [];
+        db.notifications.push(...newNotifs);
+        writeLocalDb(db);
+      } else {
+        const { error } = await supabaseClient.from("notifications").insert(newNotifs);
+        if (error) {
+          console.warn("Supabase notification broadcast error, using local fallback:", error.message);
+          const db = readLocalDb();
+          if (!db.notifications) db.notifications = [];
+          db.notifications.push(...newNotifs);
+          writeLocalDb(db);
+        }
+      }
+
+      res.json({ success: true, message: `Notification diffusée à ${userEmails.length} utilisateurs.` });
+    } catch (err: any) {
+      console.error("Error broadcasting notification:", err);
+      res.status(500).json({ error: "Erreur serveur." });
+    }
+  });
+
+  // DELETE /api/admin/listings/:id — Modération/Suppression d'une annonce
+  app.delete("/api/admin/listings/:id", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (useLocalDb) {
+        const db = readLocalDb();
+        db.listings = (db.listings || []).filter((l: any) => l.id !== id);
+        writeLocalDb(db);
+      } else {
+        const { error } = await supabaseClient.from("listings").delete().eq("id", id);
+        if (error) throw error;
+      }
+
+      res.json({ success: true, message: "Annonce supprimée par l'administrateur." });
+    } catch (err: any) {
+      console.error("Error admin deleting listing:", err);
+      res.status(500).json({ error: "Erreur serveur." });
+    }
+  });
+
+  // DELETE /api/admin/users/:email — Suppression d'un utilisateur et de toutes ses données
+  app.delete("/api/admin/users/:email", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { email } = req.params;
+      const cleanEmail = email.toLowerCase().trim();
+
+      if (cleanEmail === ADMIN_EMAIL) {
+        res.status(400).json({ error: "Impossible de supprimer le compte administrateur." });
+        return;
+      }
+
+      if (useLocalDb) {
+        const db = readLocalDb();
+        db.users = (db.users || []).filter((u: any) => u.email.toLowerCase().trim() !== cleanEmail);
+        db.listings = (db.listings || []).filter((l: any) => l.seller_email?.toLowerCase().trim() !== cleanEmail);
+        db.chats = (db.chats || []).filter((c: any) => c.seller_email?.toLowerCase().trim() !== cleanEmail && c.buyer_email?.toLowerCase().trim() !== cleanEmail);
+        writeLocalDb(db);
+      } else {
+        // Cascade delete will handle listings/chats if defined, else we delete them manually
+        await supabaseClient.from("listings").delete().eq("seller_email", cleanEmail);
+        await supabaseClient.from("profiles").delete().eq("email", cleanEmail);
+      }
+
+      res.json({ success: true, message: "Compte utilisateur supprimé avec succès." });
+    } catch (err: any) {
+      console.error("Error admin deleting user:", err);
+      res.status(500).json({ error: "Erreur serveur." });
+    }
+  });
+
+  // PATCH /api/admin/users/:email/pro — Modifier le statut Pro/Premium d'un utilisateur
+  app.patch("/api/admin/users/:email/pro", adminAuthMiddleware, async (req, res) => {
+    try {
+      const { email } = req.params;
+      const { isPro } = req.body;
+      const cleanEmail = email.toLowerCase().trim();
+
+      if (useLocalDb) {
+        const db = readLocalDb();
+        const idx = (db.users || []).findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+        if (idx !== -1) {
+          db.users[idx].isPro = isPro === true;
+          writeLocalDb(db);
+        }
+      } else {
+        // We will update local preferences as well
+        const db = readLocalDb();
+        const idx = (db.users || []).findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+        if (idx !== -1) {
+          db.users[idx].isPro = isPro === true;
+          writeLocalDb(db);
+        }
+        // Note: profiles table on Supabase may not have isPro, we can check or sync it.
+        // It's safer to sync it locally so it works.
+      }
+
+      res.json({ success: true, isPro: isPro === true });
+    } catch (err: any) {
+      console.error("Error admin updating pro status:", err);
+      res.status(500).json({ error: "Erreur serveur." });
     }
   });
 

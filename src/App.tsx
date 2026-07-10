@@ -22,7 +22,9 @@ import {
   Check,
   Sun,
   Moon,
-  Users
+  Users,
+  Link,
+  ShieldCheck
 } from "lucide-react";
 import { Listing, ChatThread } from "./types";
 import { ListingCard } from "./components/ListingCard";
@@ -37,6 +39,7 @@ import { AccountManagementModal } from "./components/AccountManagementModal";
 import { PremiumUpgradeModal } from "./components/PremiumUpgradeModal";
 import { UserProfileModal } from "./components/UserProfileModal";
 import { ProBadge } from "./components/ProBadge";
+import { AdminDashboard } from "./components/AdminDashboard";
 import { CURRENCIES, Currency, formatPrice } from "./utils/currency";
 import { motion, AnimatePresence } from "motion/react";
 import { ExpandableTabs } from "./components/ui/expandable-tabs";
@@ -111,6 +114,15 @@ export default function App() {
 
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
+  // Active Session JWT Token (stored inside sessionStorage for safety)
+  const [sessionToken, setSessionToken] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem("brocante_session_token") || "";
+    } catch {
+      return "";
+    }
+  });
+
   // Pro Subscription status & Premium Upgrade modal states
   const [isProUser, setIsProUser] = useState<boolean>(() => {
     try {
@@ -182,6 +194,9 @@ export default function App() {
   const [prefNotifEmail, setPrefNotifEmail] = useState<boolean>(() => {
     return localStorage.getItem("pref_notif_email") !== "false";
   });
+  const [prefNotifAnnouncements, setPrefNotifAnnouncements] = useState<boolean>(() => {
+    return localStorage.getItem("pref_notif_announcements") !== "false";
+  });
   const [prefRoundedPrices, setPrefRoundedPrices] = useState<boolean>(() => {
     return localStorage.getItem("pref_rounded_prices") === "true";
   });
@@ -197,6 +212,16 @@ export default function App() {
     localStorage.setItem("pref_notif_email", String(prefNotifEmail));
   }, [prefNotifEmail]);
   useEffect(() => {
+    localStorage.setItem("pref_notif_announcements", String(prefNotifAnnouncements));
+    if (currentUserEmail) {
+      fetch("/api/users/preferences", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: currentUserEmail, prefNotifAnnouncements })
+      }).catch(err => console.warn("Failed to sync announcements preference:", err));
+    }
+  }, [prefNotifAnnouncements, currentUserEmail]);
+  useEffect(() => {
     localStorage.setItem("pref_rounded_prices", String(prefRoundedPrices));
   }, [prefRoundedPrices]);
   useEffect(() => {
@@ -211,7 +236,8 @@ export default function App() {
   const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false);
 
   // View state transitions
-  const [viewMode, setViewMode] = useState<"landing" | "marketplace" | "dashboard" | "messages" | "notifications" | "demands">("landing");
+  const [viewMode, setViewMode] = useState<"landing" | "marketplace" | "dashboard" | "messages" | "notifications" | "demands" | "admin">("landing");
+
 
   // Bottom navigation visibility states and handlers on scroll
   const [isNavVisible, setIsNavVisible] = useState(true);
@@ -313,75 +339,100 @@ export default function App() {
   };
 
   // Notifications State
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
-    {
-      id: "1",
-      title: "Nouveau voisin à proximité",
-      message: "Marie D. s'est inscrite à proximité (200m). N'hésitez pas à lui souhaiter la bienvenue !",
-      time: "Il y a 2 heures",
-      type: "neighbor",
-      read: false,
-    },
-    {
-      id: "2",
-      title: "Recherche active correspondante",
-      message: "Pierre L. recherche activement un article 'canapé vintage' correspondant à l'un de vos tags d'espace.",
-      time: "Il y a 4 heures",
-      type: "offer",
-      read: false,
-    },
-    {
-      id: "3",
-      title: "Astuce Éco-Responsable",
-      message: "En vendant vos anciens objets au lieu de les jeter, vous avez économisé environ 12kg de CO2 ce mois-ci ! 🌍",
-      time: "Il y a 1 jour",
-      type: "system",
-      read: true,
-    },
-    {
-      id: "4",
-      title: "Validation de transaction",
-      message: "Nils K. a validé la réception en main propre de l'objet 'Chaise Bohème'. Votre solde virtuel a été mis à jour.",
-      time: "Il y a 3 jours",
-      type: "transaction",
-      read: true,
-    }
-  ]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
-  const handleMarkAllNotificationsAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  // Fetch user notifications from database
+  const fetchNotifications = useCallback(async () => {
+    if (!currentUserEmail) {
+      setNotifications([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/notifications?email=${encodeURIComponent(currentUserEmail)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data);
+      }
+    } catch (err) {
+      console.error("Erreur chargement notifications :", err);
+    }
+  }, [currentUserEmail]);
+
+  const handleMarkAllNotificationsAsRead = async () => {
+    if (!currentUserEmail) return;
+    try {
+      const res = await fetch("/api/notifications/mark-all-read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: currentUserEmail })
+      });
+      if (res.ok) {
+        fetchNotifications();
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const handleAddNotification = useCallback((title: string, message: string, type: "system" | "offer" | "neighbor" | "transaction", customId?: string) => {
-    setNotifications(prev => {
-      const id = customId || `notif_${Date.now()}_${Math.random()}`;
-      if (prev.some(n => n.id === id)) {
-        return prev;
-      }
-      return [
-        {
-          id,
-          title,
-          message,
-          time: "À l'instant",
-          type,
-          read: false,
-        },
-        ...prev
-      ];
-    });
+  const handleAddNotification = useCallback((title: string, message: string, type: "system" | "offer" | "neighbor" | "transaction") => {
+    // Legacy support for memory injection if needed
+    setNotifications(prev => [
+      {
+        id: `notif_${Date.now()}`,
+        title,
+        message,
+        time: "À l'instant",
+        type,
+        read: false
+      },
+      ...prev
+    ]);
   }, []);
 
-  const handleToggleNotificationRead = (id: string) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: !n.read } : n));
+  const handleToggleNotificationRead = async (id: string) => {
+    const current = notifications.find(n => n.id === id);
+    if (!current) return;
+    try {
+      const res = await fetch(`/api/notifications/${id}/read`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ read: !current.read })
+      });
+      if (res.ok) {
+        fetchNotifications();
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const handleClearNotification = (id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
+  const handleClearNotification = async (id: string) => {
+    try {
+      const res = await fetch(`/api/notifications/${id}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        fetchNotifications();
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const handleClearAllNotifications = () => {
-    setNotifications([]);
+  const handleClearAllNotifications = async () => {
+    if (!currentUserEmail) return;
+    try {
+      const res = await fetch("/api/notifications/clear-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: currentUserEmail })
+      });
+      if (res.ok) {
+        fetchNotifications();
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const [isLoginOpen, setIsLoginOpen] = useState(false);
@@ -539,7 +590,8 @@ export default function App() {
     await fetchListings();
     await fetchDemands();
     await fetchUsers();
-  }, [fetchChats, fetchListings, fetchDemands, fetchUsers]);
+    await fetchNotifications();
+  }, [fetchChats, fetchListings, fetchDemands, fetchUsers, fetchNotifications]);
 
   // Mark chat messages as read
   const markChatAsRead = useCallback(async (threadId: string) => {
@@ -596,17 +648,49 @@ export default function App() {
     }
   };
 
-  // Bootstraps initial state
+  // URL parameters handling state
+  const [urlParamsProcessed, setUrlParamsProcessed] = useState(false);
+
+  // Bootstraps initial state and processes URL parameters
   useEffect(() => {
-    fetchListings();
-    fetchDemands();
+    const init = async () => {
+      await fetchListings();
+      await fetchDemands();
+    };
+    init();
   }, [fetchListings, fetchDemands]);
+
+  useEffect(() => {
+    if (urlParamsProcessed || listings.length === 0 && demands.length === 0) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const sharedListingId = params.get("listingId");
+    const sharedDemandId = params.get("demandId");
+
+    if (sharedListingId) {
+      const match = listings.find(l => l.id === sharedListingId);
+      if (match) {
+        setActiveListing(match);
+        setViewMode("marketplace");
+        setUrlParamsProcessed(true);
+      }
+    } else if (sharedDemandId) {
+      const match = demands.find(d => d.id === sharedDemandId);
+      if (match) {
+        setViewMode("demands");
+        // We will pre-fill the demandsSearchQuery or apply a special highlighting
+        setDemandsSearchQuery(match.title);
+        setUrlParamsProcessed(true);
+      }
+    }
+  }, [listings, demands, urlParamsProcessed]);
 
   useEffect(() => {
     fetchChats();
     fetchListings();
     fetchDemands();
-  }, [currentUserEmail, fetchChats, fetchListings, fetchDemands]);
+    fetchNotifications();
+  }, [currentUserEmail, fetchChats, fetchListings, fetchDemands, fetchNotifications]);
 
   // Trigger read marking when active discussion changes
   useEffect(() => {
@@ -620,7 +704,10 @@ export default function App() {
     try {
       const response = await fetch("/api/chats", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionToken}`
+        },
         body: JSON.stringify({
           listingId,
           text,
@@ -665,7 +752,10 @@ export default function App() {
 
       const response = await fetch("/api/chats", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionToken}`
+        },
         body: JSON.stringify({
           listingId: "demand_ref_" + demand.id,
           listingTitle: `[Recherche] ${demand.title}`,
@@ -709,7 +799,10 @@ export default function App() {
     try {
       const res = await fetch("/api/listings", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionToken}`
+        },
         body: JSON.stringify(listingPayload),
       });
 
@@ -726,7 +819,10 @@ export default function App() {
     try {
       const res = await fetch("/api/demands", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionToken}`
+        },
         body: JSON.stringify(demandPayload),
       });
 
@@ -761,6 +857,9 @@ export default function App() {
     try {
       const res = await fetch(`/api/listings/${id}`, {
         method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${sessionToken}`
+        }
       });
       if (res.ok) {
         setActiveListing(null);
@@ -776,7 +875,10 @@ export default function App() {
     try {
       const res = await fetch(`/api/listings/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionToken}`
+        },
         body: JSON.stringify(updatedData),
       });
       if (res.ok) {
@@ -810,7 +912,10 @@ export default function App() {
     try {
       const response = await fetch("/api/chats", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionToken}`
+        },
         body: JSON.stringify({
           listingId: listing.id,
           text: "", // signifies empty message, just to open/find/create thread
@@ -868,6 +973,10 @@ export default function App() {
 
   const handleProfileSwitch = (email: string) => {
     const acc = simulatedAccounts.find(a => a.email.toLowerCase() === email.toLowerCase());
+    const mockToken = `mock_jwt_token_${email.toLowerCase().trim()}_${Date.now()}`;
+    sessionStorage.setItem("brocante_session_token", mockToken);
+    setSessionToken(mockToken);
+
     if (acc) {
       setCurrentUserEmail(acc.email);
       setCurrentUserName(acc.name);
@@ -883,6 +992,8 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    sessionStorage.removeItem("brocante_session_token");
+    setSessionToken("");
     setCurrentUserEmail("");
     setCurrentUserName("");
     setCurrentUserAvatar(DEFAULT_AVATAR_PLACEHOLDER);
@@ -999,7 +1110,7 @@ export default function App() {
 
           {isLoginOpen && (
             <LoginPage
-              onSuccess={(email, name, avatar) => {
+              onSuccess={(email, name, avatar, token) => {
                 const lowerEmail = email.toLowerCase();
                 // Ensure new or logging accounts don't directly get PRO status unless paid
                 const proKey = `brocante_pro_${lowerEmail}`;
@@ -1009,6 +1120,7 @@ export default function App() {
                 setCurrentUserEmail(email);
                 setCurrentUserName(name);
                 if (avatar) setCurrentUserAvatar(avatar);
+                if (token) setSessionToken(token);
                 setIsLoginOpen(false);
                 setViewMode("marketplace");
               }}
@@ -1127,7 +1239,7 @@ export default function App() {
       <AnimatePresence>
         {isLoginOpen && (
           <LoginPage
-            onSuccess={(email, name, avatar) => {
+            onSuccess={(email, name, avatar, token) => {
               const lowerEmail = email.toLowerCase();
               // Ensure new or logging accounts don't directly get PRO status unless paid
               const proKey = `brocante_pro_${lowerEmail}`;
@@ -1137,6 +1249,7 @@ export default function App() {
               setCurrentUserEmail(email);
               setCurrentUserName(name);
               if (avatar) setCurrentUserAvatar(avatar);
+              if (token) setSessionToken(token);
               setIsLoginOpen(false);
             }}
             onClose={() => setIsLoginOpen(false)}
@@ -2298,15 +2411,32 @@ export default function App() {
                       </div>
 
                       <div className="flex items-center justify-between gap-1.5 pt-2.5 mt-3 border-t border-dashed border-stone-150 dark:border-stone-800">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedUserProfile({ name: demand.buyerName, email: demand.buyerEmail })}
-                          className="text-[10px] text-stone-400 dark:text-stone-500 truncate hover:text-amber-600 transition-colors cursor-pointer flex items-center gap-1 bg-transparent border-0 p-0"
-                          title="Voir le profil de l'auteur"
-                        >
-                          <span>Auteur:</span>
-                          <strong className="text-stone-600 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-500 hover:underline font-bold">{demand.buyerName}</strong>
-                        </button>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedUserProfile({ name: demand.buyerName, email: demand.buyerEmail })}
+                            className="text-[10px] text-stone-400 dark:text-stone-500 truncate hover:text-amber-600 transition-colors cursor-pointer flex items-center gap-1 bg-transparent border-0 p-0"
+                            title="Voir le profil de l'auteur"
+                          >
+                            <span>Auteur:</span>
+                            <strong className="text-stone-600 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-500 hover:underline font-bold">{demand.buyerName}</strong>
+                          </button>
+                          
+                          {/* Share button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const shareUrl = `${window.location.origin}${window.location.pathname}?demandId=${demand.id}`;
+                              navigator.clipboard.writeText(shareUrl);
+                              alert("Lien de partage de la demande copié !");
+                            }}
+                            className="p-1 text-stone-400 hover:text-[#d2783c] transition-colors rounded-md cursor-pointer shrink-0"
+                            title="Partager cette demande d'achat"
+                          >
+                            <Link className="w-3 h-3" />
+                          </button>
+                        </div>
+
                         {(!currentUserEmail || currentUserEmail.toLowerCase() !== demand.buyerEmail.toLowerCase()) ? (
                           <button
                             onClick={() => handleContactBuyer(demand)}
@@ -2392,6 +2522,7 @@ export default function App() {
                   currency={selectedCurrency}
                   onAddNotification={handleAddNotification}
                   onNavigateToNotifications={() => setViewMode("notifications")}
+                  sessionToken={sessionToken}
                 />
               ) : (
                 <div className="p-8 text-center flex flex-col items-center justify-center h-full">
@@ -2412,6 +2543,12 @@ export default function App() {
               )}
             </div>
           </div>
+        ) : viewMode === "admin" ? (
+          <AdminDashboard
+            adminEmail={currentUserEmail}
+            currency={selectedCurrency}
+            onBackToApp={() => setViewMode("marketplace")}
+          />
         ) : (
           <SellerDashboard
             currentUserEmail={currentUserEmail}
@@ -3129,6 +3266,27 @@ export default function App() {
                         </button>
                       )}
 
+                      {/* Admin route link (Visible only to the administrator) */}
+                      {currentUserEmail && currentUserEmail.toLowerCase().trim() === "fd6016826@gmail.com" && (
+                        <button
+                          onClick={() => {
+                            setViewMode("admin");
+                            setIsSidebarOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                            viewMode === "admin"
+                              ? "bg-amber-600 text-white border-amber-600 shadow-xs"
+                              : "bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <ShieldCheck className="w-4 h-4 text-amber-500" />
+                            <span>Console Admin</span>
+                          </div>
+                          <span className="text-[9px] font-mono uppercase bg-amber-500 text-white px-1 py-0.5 rounded animate-pulse">Admin</span>
+                        </button>
+                      )}
+
                     </nav>
                   </div>
 
@@ -3330,8 +3488,14 @@ export default function App() {
             onOpenUpgradeModal={() => setIsPremiumModalOpen(true)}
             prefRoundedPrices={prefRoundedPrices}
             prefNotifEmail={prefNotifEmail}
+            prefNotifAnnouncements={prefNotifAnnouncements}
             prefAutoGeo={prefAutoGeo}
             prefVipBadge={prefVipBadge}
+            setPrefRoundedPrices={setPrefRoundedPrices}
+            setPrefNotifEmail={setPrefNotifEmail}
+            setPrefNotifAnnouncements={setPrefNotifAnnouncements}
+            setPrefAutoGeo={setPrefAutoGeo}
+            setPrefVipBadge={setPrefVipBadge}
             onOpenLogin={() => {
               setIsAccountModalOpen(false);
               setIsLoginOpen(true);

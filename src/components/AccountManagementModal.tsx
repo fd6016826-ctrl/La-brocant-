@@ -84,8 +84,14 @@ interface AccountManagementModalProps {
   onOpenUpgradeModal?: () => void;
   prefRoundedPrices?: boolean;
   prefNotifEmail?: boolean;
+  prefNotifAnnouncements?: boolean;
   prefAutoGeo?: boolean;
   prefVipBadge?: boolean;
+  setPrefRoundedPrices?: (val: boolean) => void;
+  setPrefNotifEmail?: (val: boolean) => void;
+  setPrefNotifAnnouncements?: (val: boolean) => void;
+  setPrefAutoGeo?: (val: boolean) => void;
+  setPrefVipBadge?: (val: boolean) => void;
 }
 
 type ModalSubTab = "orders" | "favorites" | "reviews" | "security" | "support";
@@ -117,8 +123,14 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
   onOpenUpgradeModal,
   prefRoundedPrices = false,
   prefNotifEmail = true,
+  prefNotifAnnouncements = true,
   prefAutoGeo = true,
-  prefVipBadge = false
+  prefVipBadge = false,
+  setPrefRoundedPrices = () => {},
+  setPrefNotifEmail = () => {},
+  setPrefNotifAnnouncements = () => {},
+  setPrefAutoGeo = () => {},
+  setPrefVipBadge = () => {}
 }) => {
   // Navigation tab state
   const [subTab, setSubTab] = useState<ModalSubTab>("orders");
@@ -136,12 +148,6 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
   const [newAccEmail, setNewAccEmail] = useState("");
   const [newAccAvatar, setNewAccAvatar] = useState(DEFAULT_AVATAR_PLACEHOLDER);
   const [showAddForm, setShowAddForm] = useState(false);
-
-  // Dummy setters for disabled subtabs
-  const setPrefNotifEmail = (val: boolean) => {};
-  const setPrefRoundedPrices = (val: boolean) => {};
-  const setPrefAutoGeo = (val: boolean) => {};
-  const setPrefVipBadge = (val: boolean) => {};
 
   // Support Ticketing State
   const [tickets, setTickets] = useState<{ id: string; subject: string; message: string; date: string; status: string; answer?: string }[]>(() => {
@@ -1390,8 +1396,71 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
                     </div>
                   </div>
 
+                  {/* Application Settings Preferences Panel */}
+                  <div className="bg-stone-50 dark:bg-stone-850/20 p-4.5 rounded-2xl border border-stone-200 dark:border-stone-850 space-y-4">
+                    <span className="text-[9px] font-mono text-stone-400 uppercase font-bold block border-b pb-1">Préférences de l'application</span>
+                    
+                    <div className="space-y-3.5 text-xs">
+                      {/* Notifications Email */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold block text-stone-800 dark:text-stone-200">Alertes e-mail</span>
+                          <span className="text-[10px] text-stone-500 block">Recevoir les devis et alertes par e-mail</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={prefNotifEmail}
+                          onChange={(e) => setPrefNotifEmail(e.target.checked)}
+                          className="w-4 h-4 text-amber-600 border-stone-300 focus:ring-amber-500 rounded-sm cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Notifications Annonces */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold block text-stone-800 dark:text-stone-200">Alertes de recherche</span>
+                          <span className="text-[10px] text-stone-500 block">Notification sur les nouveaux avis de recherche</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={prefNotifAnnouncements}
+                          onChange={(e) => setPrefNotifAnnouncements(e.target.checked)}
+                          className="w-4 h-4 text-amber-600 border-stone-300 focus:ring-amber-500 rounded-sm cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Rounded Prices */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold block text-stone-800 dark:text-stone-200">Arrondir les prix</span>
+                          <span className="text-[10px] text-stone-500 block">Afficher les prix sans centimes</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={prefRoundedPrices}
+                          onChange={(e) => setPrefRoundedPrices(e.target.checked)}
+                          className="w-4 h-4 text-amber-600 border-stone-300 focus:ring-amber-500 rounded-sm cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Auto Geo */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold block text-stone-800 dark:text-stone-200">Géolocalisation</span>
+                          <span className="text-[10px] text-stone-500 block">Calculer automatiquement la distance</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={prefAutoGeo}
+                          onChange={(e) => setPrefAutoGeo(e.target.checked)}
+                          className="w-4 h-4 text-amber-600 border-stone-300 focus:ring-amber-500 rounded-sm cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   {/* ACCOUNT CLOSURE INSTRUCTIONS */}
-                  <div className="bg-red-500/5 dark:bg-red-500/10 border border-red-500/15 p-4.5 rounded-2xl flex flex-col justify-between text-left">
+                  <div className="bg-red-500/5 dark:bg-red-500/10 border border-red-500/15 p-4.5 rounded-2xl flex flex-col justify-between text-left md:col-span-2">
                     <div className="space-y-1.5">
                       <h4 className="text-xs font-bold font-serif text-red-700 dark:text-red-450 flex items-center gap-1.5">
                         <ShieldAlert className="w-4.5 h-4.5 shrink-0" /> Clôturer définitivement mon compte

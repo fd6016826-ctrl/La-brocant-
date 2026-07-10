@@ -93,6 +93,9 @@ export function LoginPage({
   const [successMsg, setSuccessMsg] = useState("");
   const [selectedAvatar, setSelectedAvatar] = useState(PRESET_AVATARS[0].url);
   const [avatarTab, setAvatarTab] = useState<"preset" | "upload">("preset");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [tempPassword, setTempPassword] = useState("");
+  const [showTempPasswordAlert, setShowTempPasswordAlert] = useState(false);
 
   // Handle countdown timer for OTP screen
   React.useEffect(() => {
@@ -193,9 +196,10 @@ export function LoginPage({
     }
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
+    setSuccessMsg("");
 
     if (activeView === "register") {
       if (!email.trim() || !email.includes("@")) {
@@ -210,41 +214,97 @@ export function LoginPage({
         setErrorMsg("Veuillez saisir votre nom.");
         return;
       }
-      if (!password || password.length < 4) {
-        setErrorMsg("Le mot de passe doit contenir au moins 4 caractères.");
-        return;
-      }
-      if (password !== confirmPassword) {
-        setErrorMsg("Les deux mots de passe ne correspondent pas.");
-        return;
-      }
       if (!acceptedTerms) {
         setErrorMsg("Vous devez accepter les conditions d'utilisation.");
         return;
       }
-
-      // Transition to OTP verification
-      generateAndSendOtp(email.trim(), "register");
+      setIsSubmitting(true);
+      try {
+        const response = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: email.trim(),
+            name: `${firstName.trim()} ${lastName.trim()}`,
+            avatar: selectedAvatar
+          })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          setErrorMsg(data.error || "Une erreur est survenue lors de l'inscription.");
+          return;
+        }
+        // Show generated password to user
+        setTempPassword(data.password || "");
+        setShowTempPasswordAlert(true);
+        setSuccessMsg("Compte créé ! Utilisez le mot de passe ci-dessous pour vous connecter.");
+        setPassword("");
+        setActiveView("login");
+      } catch (err) {
+        setErrorMsg("Erreur réseau lors de l'inscription.");
+      } finally {
+        setIsSubmitting(false);
+      }
     } else if (activeView === "login") {
       if (!email.trim() || !email.includes("@")) {
         setErrorMsg("Veuillez saisir une adresse email valide.");
         return;
       }
-      if (!password || password.length < 4) {
-        setErrorMsg("Le mot de passe doit contenir au moins 4 caractères.");
+      if (!password) {
+        setErrorMsg("Veuillez saisir votre mot de passe.");
         return;
       }
-
-      // Transition to OTP verification for maximum completeness/security demo
-      generateAndSendOtp(email.trim(), "login");
+      setIsSubmitting(true);
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email.trim(), password })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          setErrorMsg(data.error || "Email ou mot de passe incorrect.");
+          return;
+        }
+        // Direct login — no OTP screen
+        sessionStorage.setItem("brocante_session_token", data.token);
+        onSuccess(
+          data.user.email,
+          data.user.name,
+          data.user.avatar || DEFAULT_AVATAR_PLACEHOLDER
+        );
+      } catch (err) {
+        setErrorMsg("Erreur réseau lors de la connexion.");
+      } finally {
+        setIsSubmitting(false);
+      }
     } else if (activeView === "forgot_password") {
       if (!email.trim() || !email.includes("@")) {
         setErrorMsg("Veuillez saisir une adresse email valide.");
         return;
       }
-
-      // Transition to OTP verification to verify identity
-      generateAndSendOtp(email.trim(), "forgot_password");
+      setIsSubmitting(true);
+      try {
+        const response = await fetch("/api/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email.trim() })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          setErrorMsg(data.error || "Impossible de réinitialiser le mot de passe.");
+          return;
+        }
+        setTempPassword(data.password || "");
+        setShowTempPasswordAlert(true);
+        setPassword("");
+        setSuccessMsg("Nouveau mot de passe généré. Utilisez-le pour vous connecter.");
+        setActiveView("login");
+      } catch (err) {
+        setErrorMsg("Erreur réseau lors de la réinitialisation.");
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -418,6 +478,31 @@ export function LoginPage({
                       </div>
                     )}
 
+                    {showTempPasswordAlert && tempPassword && (
+                      <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-left relative">
+                        <button
+                          type="button"
+                          onClick={() => setShowTempPasswordAlert(false)}
+                          className="absolute top-2 right-2 text-amber-500 hover:text-amber-700 text-xs font-black cursor-pointer"
+                        >✕</button>
+                        <p className="text-[10px] font-mono font-black text-amber-700 uppercase tracking-wider mb-1">🔑 Votre mot de passe temporaire</p>
+                        <p className="text-[10.5px] text-amber-800 mb-2 leading-snug">
+                          Votre compte a été créé. Utilisez ce mot de passe pour vous connecter.
+                        </p>
+                        <div className="flex items-center gap-2 bg-white border border-amber-200 rounded-lg px-3 py-2">
+                          <span className="font-mono font-black text-stone-900 text-sm tracking-wider flex-1 select-all">{tempPassword}</span>
+                          <button
+                            type="button"
+                            onClick={() => { navigator.clipboard.writeText(tempPassword); }}
+                            className="text-[9px] font-bold text-amber-700 hover:text-amber-900 uppercase tracking-wider border border-amber-300 rounded px-2 py-1 hover:bg-amber-100 cursor-pointer transition-colors"
+                          >
+                            Copier
+                          </button>
+                        </div>
+                        <p className="text-[9.5px] text-amber-600 mt-1.5">⚠️ Notez ce mot de passe, il ne sera plus visible après fermeture.</p>
+                      </div>
+                    )}
+
                     {errorMsg && (
                       <div className="bg-red-50 text-red-700 text-[11px] font-mono p-2.5 rounded-xl border border-red-200">
                         ⚠️ {errorMsg}
@@ -478,10 +563,10 @@ export function LoginPage({
 
                       <button
                         type="submit"
-                        disabled={isLoadingOtp}
+                        disabled={isSubmitting}
                         className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3.5 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer mt-2 disabled:opacity-50"
                       >
-                        {isLoadingOtp ? "Envoi du code..." : "Continuer"}
+                        {isSubmitting ? "Connexion en cours..." : "Continuer"}
                       </button>
                     </form>
 
@@ -679,51 +764,6 @@ export function LoginPage({
                         )}
                       </div>
 
-                      <div className="space-y-1 text-left">
-                        <label className="block text-xs font-semibold text-stone-700">
-                          Mot de passe
-                        </label>
-                        <div className="relative">
-                          <input
-                            type={showPassword ? "text" : "password"}
-                            placeholder="••••••••"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full text-xs border border-stone-250 rounded-lg pl-3.5 pr-10 py-3 bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-stone-900 shadow-3xs"
-                            required
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-3.5 top-3 text-stone-400 hover:text-stone-700"
-                          >
-                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1 text-left">
-                        <label className="block text-xs font-semibold text-stone-700">
-                          Confirmer le mot de passe
-                        </label>
-                        <div className="relative">
-                          <input
-                            type={showConfirmPassword ? "text" : "password"}
-                            placeholder="Saisissez le mot de passe à nouveau"
-                            value={confirmPassword}
-                            onChange={(e) => setConfirmPassword(e.target.value)}
-                            className="w-full text-xs border border-stone-250 rounded-lg pl-3.5 pr-10 py-3 bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-stone-900 shadow-3xs"
-                            required
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                            className="absolute right-3.5 top-3 text-stone-400 hover:text-stone-700"
-                          >
-                            {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                      </div>
 
                       <div className="flex items-start gap-2 pt-0.5 text-left">
                         <input
@@ -748,10 +788,10 @@ export function LoginPage({
 
                       <button
                         type="submit"
-                        disabled={isLoadingOtp}
+                        disabled={isSubmitting}
                         className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
                       >
-                        {isLoadingOtp ? "Envoi du code..." : "Confirmer"}
+                        {isSubmitting ? "Inscription en cours..." : "Confirmer"}
                       </button>
                     </form>
                   </motion.div>

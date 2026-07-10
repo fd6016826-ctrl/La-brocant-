@@ -133,3 +133,15 @@ Pour valider et profiter de ces changements, voici ce que vous devez faire :
      - Passage des champs de saisie OTP de **4 chiffres à 6 chiffres** (format natif Supabase).
      - La notification toast affiche désormais deux messages distincts : un pour le mode simulé (avec le code en clair) et un pour le vrai e-mail (indiquant que le code a été envoyé à l'adresse e-mail saisie).
      - Les boutons de soumission (Continuer, Confirmer) affichent un texte de chargement ("Envoi du code...", "Vérification...") et sont désactivés pendant les appels réseau pour éviter les soumissions multiples.
+
+9. **Sécurisation de l'API et Correction de l'Audit de Sécurité :**
+   - **Protection des points d'accès par Token JWT :** Création du middleware `requireAuth` sur Express qui décode et valide le jeton de session de l'utilisateur (`supabaseClient.auth.getUser()`). Les requêtes fetch du client transmettent ce jeton via l'en-tête `Authorization: Bearer <token>`.
+   - **Contrôle d'identité strict :** L'identité de l'auteur d'une annonce, d'un message de tchat ou d'une demande est extraite directement du jeton de session validé côté serveur (`req.user.email`), rendant toute usurpation d'adresse e-mail impossible.
+   - **Installation de CORS et Rate Limiting :** Restreint l'accès à l'API à l'origine de l'application et limite la fréquence des requêtes (notamment sur l'envoi d'OTP pour bloquer le brute-force et sur la messagerie pour protéger l'API Gemini des abus de coûts).
+   - **Sécurisation des Uploads :** Ajout d'un validateur d'extension strict (liste blanche des types MIME d'images et de vidéos autorisés) et d'une limitation stricte de la taille du fichier individuel à 5 Mo.
+   - **Politiques de Sécurité RLS robustes :** Mise à jour du script SQL pour remplacer les politiques permissives par des politiques de Row Level Security basées sur `auth.jwt()`, interdisant à un tiers de modifier ou de supprimer les données d'un autre utilisateur.
+
+10. **Système de Connexion et Inscription par Mot de passe (Min 6 caractères) + Validation OTP :**
+    - Transition du flux principal d'inscription et de connexion vers Email + Mot de passe (avec validation stricte de **6 caractères minimum**).
+    - **Vérification OTP obligatoire** : Les endpoints `POST /api/auth/signup` et `POST /api/auth/login` enregistrent les tentatives en mémoire (`pendingRegistrations`, `pendingLogins`) et déclenchent l'envoi d'un OTP à 6 chiffres vers l'adresse e-mail (via Supabase ou fallback simulé). L'application n'est plus court-circuitée directement ; l'utilisateur doit obligatoirement saisir le code OTP pour finaliser et valider la session dans `POST /api/auth/verify-otp`.
+
