@@ -752,8 +752,9 @@ app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 // Static directory for uploaded product files
 app.use("/uploads", express.static(UPLOADS_DIR));
 
-// Start function for local development server only
-async function start() {
+// Start function — synchronous so routes are registered immediately at module load
+// (critical for Vercel serverless: no async timing issue)
+function start() {
 
   // --- API DEFINITIONS ---
 
@@ -2707,25 +2708,28 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
   });
 
   // --- INTEGRATION OF VITE AS DEV OR PROD MIDDLEWARE (Skip on Vercel Serverless) ---
+  // Use async IIFE so start() stays synchronous (routes registered immediately)
   if (!process.env.VERCEL) {
-    if (process.env.NODE_ENV !== "production") {
-      const { createServer: createViteServer } = await import("vite");
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa",
-      });
-      app.use(vite.middlewares);
-    } else {
-      const distPath = path.join(process.cwd(), "dist");
-      app.use(express.static(distPath));
-      app.get("*", (req, res) => {
-        res.sendFile(path.join(distPath, "index.html"));
-      });
-    }
+    (async () => {
+      if (process.env.NODE_ENV !== "production") {
+        const { createServer: createViteServer } = await import("vite");
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: "spa",
+        });
+        app.use(vite.middlewares);
+      } else {
+        const distPath = path.join(process.cwd(), "dist");
+        app.use(express.static(distPath));
+        app.get("*", (req, res) => {
+          res.sendFile(path.join(distPath, "index.html"));
+        });
+      }
 
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`[Brocante Server] Running at http://localhost:${PORT}`);
-    });
+      app.listen(PORT, "0.0.0.0", () => {
+        console.log(`[Brocante Server] Running at http://localhost:${PORT}`);
+      });
+    })();
   }
 }
 
