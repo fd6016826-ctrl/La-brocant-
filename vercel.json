@@ -1,14 +1,24 @@
 {
-  "buildCommand": "vite build && npx esbuild server.ts --bundle --platform=node --format=cjs --packages=external --log-override:empty-import-meta=silent --outfile=server.cjs",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.ts" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
-  ],
+  "env": {
+    "NODE_ENV": "production"
+  },
   "functions": {
     "api/index.ts": {
-      "includeFiles": "server.cjs",
-      "maxDuration": 30
+      "runtime": "nodejs20.x",
+      "maxDuration": 60,
+      "memory": 1024
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }
