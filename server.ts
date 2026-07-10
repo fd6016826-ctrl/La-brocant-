@@ -2729,7 +2729,6 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
   }
 }
 
-// Export the initialization promise so Vercel serverless can await route setup
-export const startPromise = start();
+start();
 
 export default app;

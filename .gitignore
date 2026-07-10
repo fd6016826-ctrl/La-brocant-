@@ -5,7 +5,6 @@ dist
 .env.*.local
 project.zip
 *.log
-server.cjs
 .gemini
 .agents
 .system_generated
