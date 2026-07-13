@@ -57,7 +57,7 @@ const PRESET_AVATARS = [
 ];
 
 export interface LoginPageProps {
-  onSuccess: (email: string, name: string, avatar?: string) => void;
+  onSuccess: (email: string, name: string, avatar?: string, token?: string) => void;
   onClose: () => void;
   initialEmail?: string;
   defaultSimulatedEmails?: string[];

@@ -2753,7 +2753,8 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
 
       if (useLocalDb) {
         const db = readLocalDb();
-        const idx = (db.users || []).findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+        if (!db.users) db.users = [];
+        const idx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
         if (idx !== -1) {
           db.users[idx].isPro = isPro === true;
           writeLocalDb(db);
@@ -2761,7 +2762,8 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       } else {
         // We will update local preferences as well
         const db = readLocalDb();
-        const idx = (db.users || []).findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+        if (!db.users) db.users = [];
+        const idx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
         if (idx !== -1) {
           db.users[idx].isPro = isPro === true;
           writeLocalDb(db);
