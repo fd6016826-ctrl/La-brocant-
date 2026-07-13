@@ -2333,4 +2333,5 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
 }
 start();
 var server_default = app;
+module.exports = app;
 //# sourceMappingURL=index.cjs.map
