@@ -3,12 +3,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --external:vite --external:esbuild --external:lightningcss --sourcemap --log-override:empty-import-meta=silent --outfile=server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --external:vite --external:esbuild --external:lightningcss --sourcemap --log-override:empty-import-meta=silent --outfile=api/index.js",
     "clean": "rm -rf dist",
     "dev": "tsx server.ts",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
-    "start": "node server.cjs"
+    "start": "node api/index.js"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",

@@ -1,10 +1,10 @@
 {
-  "buildCommand": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --external:vite --external:esbuild --external:lightningcss --log-override:empty-import-meta=silent --outfile=server.cjs",
+  "buildCommand": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --external:vite --external:esbuild --external:lightningcss --log-override:empty-import-meta=silent --outfile=api/index.js",
   "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index.ts"
+      "destination": "/api/index.js"
     },
     {
       "source": "/((?!api/).*)",
@@ -12,10 +12,10 @@
     }
   ],
   "functions": {
-    "api/index.ts": {
-      "includeFiles": "server.cjs",
+    "api/index.js": {
       "maxDuration": 30
     }
   }
 }
+
 
