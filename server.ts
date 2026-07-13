@@ -19,10 +19,17 @@ const localDirname = typeof __dirname !== "undefined"
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SECRET_KEY || "";
-if (!supabaseUrl || !supabaseKey) {
-  console.warn("WARNING: Supabase URL or Secret Key is missing in environment variables.");
+let supabaseClient: any = null;
+
+if (supabaseUrl && supabaseKey) {
+  try {
+    supabaseClient = createClient(supabaseUrl, supabaseKey);
+  } catch (err) {
+    console.warn("[Brocante] Erreur lors de l'instanciation du client Supabase:", err);
+  }
+} else {
+  console.warn("AVERTISSEMENT: SUPABASE_URL ou SUPABASE_SECRET_KEY est manquant dans les variables d'environnement. Fallback local actif.");
 }
-const supabaseClient = createClient(supabaseUrl, supabaseKey);
 
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "fd6016826@gmail.com").trim().toLowerCase();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin_temp_change_me";
@@ -218,7 +225,7 @@ async function checkIsProUser(email: string): Promise<boolean> {
     return true;
   }
   try {
-    if (useLocalDb) {
+    if (useLocalDb || !supabaseClient) {
       const db = readLocalDb();
       const user = (db.users || []).find((u: any) => u.email.toLowerCase().trim() === cleanEmail);
       return !!(user && user.isPro);
@@ -246,7 +253,7 @@ async function createNotification(userEmail: string, title: string, message: str
       if (!isPro) {
         // Free user: check if there's already a transaction notification in last 24h
         const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        if (useLocalDb) {
+        if (useLocalDb || !supabaseClient) {
           const db = readLocalDb();
           const list = db.notifications || [];
           const hasRecent = list.some((n: any) => 
@@ -284,7 +291,7 @@ async function createNotification(userEmail: string, title: string, message: str
       created_at: new Date().toISOString()
     };
 
-    if (useLocalDb) {
+    if (useLocalDb || !supabaseClient) {
       const db = readLocalDb();
       if (!db.notifications) db.notifications = [];
       db.notifications.push(notifObj);
@@ -568,7 +575,7 @@ class LocalQueryBuilder {
 // Wrapper for supabase to choose between client and local DB
 const supabase = {
   from(tableName: string) {
-    if (useLocalDb) {
+    if (useLocalDb || !supabaseClient) {
       return new LocalQueryBuilder(tableName) as any;
     }
     return supabaseClient.from(tableName);
@@ -732,6 +739,12 @@ app.use(cors({
 let supabaseChecked = false;
 async function checkSupabaseConnection() {
   if (supabaseChecked) return;
+  if (!supabaseClient) {
+    console.warn("[Brocante] Client Supabase non initialisé (variables d'environnement manquantes). Fallback local actif.");
+    useLocalDb = true;
+    supabaseChecked = true;
+    return;
+  }
   try {
     const { error } = await supabaseClient.from("profiles").select("email").limit(1);
     if (error) {

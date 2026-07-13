@@ -47,10 +47,16 @@ var localFilename = typeof __filename !== "undefined" ? __filename : (0, import_
 var localDirname = typeof __dirname !== "undefined" ? __dirname : import_path.default.dirname(localFilename);
 var supabaseUrl = process.env.SUPABASE_URL || "";
 var supabaseKey = process.env.SUPABASE_SECRET_KEY || "";
-if (!supabaseUrl || !supabaseKey) {
-  console.warn("WARNING: Supabase URL or Secret Key is missing in environment variables.");
+var supabaseClient = null;
+if (supabaseUrl && supabaseKey) {
+  try {
+    supabaseClient = (0, import_supabase_js.createClient)(supabaseUrl, supabaseKey);
+  } catch (err) {
+    console.warn("[Brocante] Erreur lors de l'instanciation du client Supabase:", err);
+  }
+} else {
+  console.warn("AVERTISSEMENT: SUPABASE_URL ou SUPABASE_SECRET_KEY est manquant dans les variables d'environnement. Fallback local actif.");
 }
-var supabaseClient = (0, import_supabase_js.createClient)(supabaseUrl, supabaseKey);
 var ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "fd6016826@gmail.com").trim().toLowerCase();
 var ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin_temp_change_me";
 var pendingOtps = /* @__PURE__ */ new Map();
@@ -232,7 +238,7 @@ async function checkIsProUser(email) {
     return true;
   }
   try {
-    if (useLocalDb) {
+    if (useLocalDb || !supabaseClient) {
       const db = readLocalDb();
       const user = (db.users || []).find((u) => u.email.toLowerCase().trim() === cleanEmail);
       return !!(user && user.isPro);
@@ -253,7 +259,7 @@ async function createNotification(userEmail, title, message, type) {
       const isPro = await checkIsProUser(cleanEmail);
       if (!isPro) {
         const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1e3).toISOString();
-        if (useLocalDb) {
+        if (useLocalDb || !supabaseClient) {
           const db = readLocalDb();
           const list = db.notifications || [];
           const hasRecent = list.some(
@@ -281,7 +287,7 @@ async function createNotification(userEmail, title, message, type) {
       read: false,
       created_at: (/* @__PURE__ */ new Date()).toISOString()
     };
-    if (useLocalDb) {
+    if (useLocalDb || !supabaseClient) {
       const db = readLocalDb();
       if (!db.notifications) db.notifications = [];
       db.notifications.push(notifObj);
@@ -531,7 +537,7 @@ var LocalQueryBuilder = class {
 };
 var supabase = {
   from(tableName) {
-    if (useLocalDb) {
+    if (useLocalDb || !supabaseClient) {
       return new LocalQueryBuilder(tableName);
     }
     return supabaseClient.from(tableName);
@@ -680,6 +686,12 @@ app.use((0, import_cors.default)({
 var supabaseChecked = false;
 async function checkSupabaseConnection() {
   if (supabaseChecked) return;
+  if (!supabaseClient) {
+    console.warn("[Brocante] Client Supabase non initialis\xE9 (variables d'environnement manquantes). Fallback local actif.");
+    useLocalDb = true;
+    supabaseChecked = true;
+    return;
+  }
   try {
     const { error } = await supabaseClient.from("profiles").select("email").limit(1);
     if (error) {
