@@ -18,13 +18,15 @@ CREATE POLICY "Allow public read access to profiles" ON public.profiles FOR SELE
 DROP POLICY IF EXISTS "Allow owner update access to profiles" ON public.profiles;
 CREATE POLICY "Allow owner update access to profiles" ON public.profiles FOR ALL USING (email = auth.jwt()->>'email') WITH CHECK (email = auth.jwt()->>'email');
 
--- Insert the two active default accounts
+-- Insert the default active accounts
 INSERT INTO public.profiles (email, name, avatar_url, password, pref_notif_announcements)
 VALUES 
+    ('fd6016826@gmail.com', 'Fallou Diouf', 'data:image/svg+xml;utf8,<svg xmlns=''http://www.w3.org/2000/svg'' viewBox=''0 0 100 100''><defs><linearGradient id=''g1'' x1=''0%'' y1=''0%'' x2=''100%'' y2=''100%''><stop offset=''0%'' stop-color=''%23fbbf24''/><stop offset=''100%'' stop-color=''%23d97706''/></linearGradient></defs><rect width=''100'' height=''100'' rx=''28'' fill=''url(%23g1)''/><g fill=''none'' stroke=''%23ffffff'' stroke-width=''5.5'' stroke-linecap=''round'' stroke-linejoin=' 'round''><path d=''M30 42h40v30c0 4-3 7-7 7H37c-4 0-7-3-7-7V42z''/><path d=''M40 42c0-5 3-9 10-9s10 4 10 9''/><circle cx=''50'' cy=''58'' r=''4'' fill=''%23ffffff''/></g></svg>', 'Diouffallou@2004', true),
     ('jean.testeur@gmail.com', 'Jean Testeur', 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop', '123456', true),
     ('sophie.b69@gmail.com', 'Sophie B.', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop', '123456', true)
 ON CONFLICT (email) DO UPDATE 
-SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url;
+SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url, password = EXCLUDED.password;
+
 
 
 -- 2. Create listings table (annonces de vente)
