@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --log-override:empty-import-meta=silent --outfile=server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --external:vite --external:esbuild --external:lightningcss --sourcemap --log-override:empty-import-meta=silent --outfile=server.cjs",
     "clean": "rm -rf dist",
     "dev": "tsx server.ts",
     "lint": "tsc --noEmit",

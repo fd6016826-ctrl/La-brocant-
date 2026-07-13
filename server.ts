@@ -2201,7 +2201,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       const cleanEmail = email.trim().toLowerCase();
       const mockCode = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
 
-      if (useLocalDb) {
+      if (useLocalDb || !supabaseClient) {
         // Local DB mode always uses simulated OTP
         pendingOtps.set(cleanEmail, { code: mockCode, expiresAt: Date.now() + 10 * 60 * 1000 });
         res.json({ success: true, isMocked: true, code: mockCode });
@@ -2250,7 +2250,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         return;
       }
 
-      if (useLocalDb) {
+      if (useLocalDb || !supabaseClient) {
         res.status(400).json({ error: "Code de validation incorrect." });
       } else {
         // Verify via real Supabase Auth

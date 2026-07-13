@@ -1,16 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import serverModule from '../server.cjs';
 
-let appInstance: any;
+const app = serverModule.default || serverModule;
 
-async function loadServer() {
-  if (!appInstance) {
-    const serverModule = await import('../server.cjs');
-    appInstance = serverModule.default || serverModule;
-  }
-  return appInstance;
-}
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default function handler(req: VercelRequest, res: VercelResponse) {
   // Ensure CORS headers are attached on all Vercel responses
   const origin = (req.headers as any)?.origin || "*";
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -27,17 +20,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  try {
-    const app = await loadServer();
-    return await app(req, res);
-  } catch (error: any) {
-    console.error("[Vercel Serverless Handler Error]:", error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: "Erreur du serveur Vercel Serverless.",
-        message: process.env.NODE_ENV === "production" ? "Une erreur inattendue est survenue." : (error.message || String(error))
-      });
-    }
-  }
+  return app(req, res);
 }
+
 

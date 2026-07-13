@@ -1857,7 +1857,7 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
       }
       const cleanEmail = email.trim().toLowerCase();
       const mockCode = Math.floor(1e5 + Math.random() * 9e5).toString();
-      if (useLocalDb) {
+      if (useLocalDb || !supabaseClient) {
         pendingOtps.set(cleanEmail, { code: mockCode, expiresAt: Date.now() + 10 * 60 * 1e3 });
         res.json({ success: true, isMocked: true, code: mockCode });
       } else {
@@ -1895,7 +1895,7 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
         res.json({ success: true, message: "Code v\xE9rifi\xE9 avec succ\xE8s (mode simulation)." });
         return;
       }
-      if (useLocalDb) {
+      if (useLocalDb || !supabaseClient) {
         res.status(400).json({ error: "Code de validation incorrect." });
       } else {
         const { error } = await supabaseClient.auth.verifyOtp({
