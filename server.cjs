@@ -62,7 +62,133 @@ var ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Diouffallou@2004";
 var pendingOtps = /* @__PURE__ */ new Map();
 var useLocalDb = false;
 var localDbPath = import_path.default.join(localDirname, "local_db.json");
+var inMemoryDb = null;
 function readLocalDb() {
+  if (inMemoryDb) {
+    return inMemoryDb;
+  }
+  const defaultData = {
+    notifications: [],
+    listings: [
+      {
+        id: "1",
+        title: "Enfilade scandinave en teck vintage",
+        description: "Superbe enfilade scandinave des ann\xE9es 60 en teck. 3 portes coulissantes et 3 tiroirs. Tr\xE8s bel \xE9tat g\xE9n\xE9ral.",
+        price: 480,
+        category: "Maison & D\xE9co",
+        location: "Lyon",
+        condition: "Tr\xE8s bon \xE9tat",
+        image_url: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?w=800&auto=format&fit=crop&q=80",
+        video_url: "",
+        size: "180x45x75 cm",
+        color: "Miel / Teck",
+        quantity: 1,
+        additional_images: [],
+        seller_name: "Marc Dupuis",
+        seller_email: "marc.dupuis@outlook.fr",
+        seller_phone: "06 12 34 56 78",
+        created_at: new Date(Date.now() - 36e5 * 2).toISOString(),
+        is_sold: false,
+        is_sponsored: true
+      },
+      {
+        id: "2",
+        title: "Appareil photo reflex Canon EOS 80D",
+        description: "Vendu avec objectif EFS 18-135mm, sacoche de transport, batterie et chargeur. Parfait pour d\xE9buter en photographie.",
+        price: 550,
+        category: "\xC9lectronique",
+        location: "Paris",
+        condition: "Comme neuf",
+        image_url: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&auto=format&fit=crop&q=80",
+        video_url: "",
+        size: "N/A",
+        color: "Noir",
+        quantity: 1,
+        additional_images: [],
+        seller_name: "Sophie B.",
+        seller_email: "sophie.b69@gmail.com",
+        seller_phone: "06 98 76 54 32",
+        created_at: new Date(Date.now() - 36e5 * 12).toISOString(),
+        is_sold: false,
+        is_sponsored: false
+      },
+      {
+        id: "3",
+        title: "Collection de Vinyles Rock Classique (x10)",
+        description: "Lot de 10 vinyles rock (Pink Floyd, Led Zeppelin, The Rolling Stones...). Pochettes en bon \xE9tat, disques sans rayures majeures.",
+        price: 120,
+        category: "Livres & Culture",
+        location: "Bordeaux",
+        condition: "Bon \xE9tat",
+        image_url: "https://images.unsplash.com/photo-1539635278303-d4002c07eae3?w=800&auto=format&fit=crop&q=80",
+        video_url: "",
+        size: "12 pouces",
+        color: "Noir",
+        quantity: 1,
+        additional_images: [],
+        seller_name: "Jean Testeur",
+        seller_email: "jean.testeur@gmail.com",
+        seller_phone: "07 11 22 33 44",
+        created_at: new Date(Date.now() - 36e5 * 24).toISOString(),
+        is_sold: false,
+        is_sponsored: false
+      }
+    ],
+    demands: [
+      {
+        id: "demand_1",
+        title: "Recherche Canap\xE9 Togo Ligne Roset",
+        description: "Je recherche activement un canap\xE9 Togo de chez Ligne Roset, de pr\xE9f\xE9rence en velours ou cuir, couleur chaud (orange, marron ou beige). Budget flexible selon l'\xE9tat.",
+        desired_price: 1500,
+        quantity: 1,
+        size: "3 places ou angle",
+        color: "Chaud",
+        other_specs: "Authentique avec \xE9tiquette",
+        image_url: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800&auto=format&fit=crop&q=80",
+        buyer_email: "pierre.m@gmail.com",
+        buyer_name: "Pierre M.",
+        created_at: new Date(Date.now() - 36e5 * 4).toISOString()
+      }
+    ],
+    chats: [
+      {
+        id: "chat_1",
+        listing_id: "1",
+        listing_title: "Enfilade scandinave en teck vintage",
+        listing_price: 480,
+        listing_image_url: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?w=800&auto=format&fit=crop&q=80",
+        seller_email: "marc.dupuis@outlook.fr",
+        seller_name: "Marc Dupuis",
+        buyer_email: "antigravity@la-brocante.fr",
+        buyer_name: "Agent Antigravity \u{1F916}",
+        last_message_at: new Date(Date.now() - 36e5 * 2).toISOString(),
+        messages: [
+          {
+            id: "msg_1",
+            senderEmail: "antigravity@la-brocante.fr",
+            senderName: "Agent Antigravity \u{1F916}",
+            text: "Bonjour Marc ! Votre enfilade scandinave en teck est vraiment magnifique. Est-elle toujours disponible ?",
+            createdAt: new Date(Date.now() - 36e5 * 2 - 6e4).toISOString(),
+            isRead: true
+          },
+          {
+            id: "msg_2",
+            senderEmail: "marc.dupuis@outlook.fr",
+            senderName: "Marc Dupuis",
+            text: "Bonjour ! Oui, elle est toujours disponible et visible sur Lyon 3e.",
+            createdAt: new Date(Date.now() - 36e5 * 2).toISOString(),
+            isRead: false
+          }
+        ],
+        requested_quantity: 1
+      }
+    ],
+    users: [
+      { email: "fd6016826@gmail.com", name: "Fallou Diouf", avatar: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g1' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23fbbf24'/><stop offset='100%' stop-color='%23d97706'/></linearGradient></defs><rect width='100' height='100' rx='28' fill='url(%23g1)'/><g fill='none' stroke='%23ffffff' stroke-width='5.5' stroke-linecap='round' stroke-linejoin='round'><path d='M30 42h40v30c0 4-3 7-7 7H37c-4 0-7-3-7-7V42z'/><path d='M40 42c0-5 3-9 10-9s10 4 10 9'/><circle cx='50' cy='58' r='4' fill='%23ffffff'/></g></svg>", password: "Diouffallou@2004", isPro: true, pref_notif_announcements: true },
+      { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop", password: "123456", pref_notif_announcements: true },
+      { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop", password: "123456", pref_notif_announcements: true }
+    ]
+  };
   try {
     let needsInitialization = false;
     if (!import_fs.default.existsSync(localDbPath)) {
@@ -79,139 +205,18 @@ function readLocalDb() {
       }
     }
     if (needsInitialization) {
-      const defaultData = {
-        notifications: [],
-        listings: [
-          {
-            id: "1",
-            title: "Enfilade scandinave en teck vintage",
-            description: "Superbe enfilade scandinave des ann\xE9es 60 en teck. 3 portes coulissantes et 3 tiroirs. Tr\xE8s bel \xE9tat g\xE9n\xE9ral.",
-            price: 480,
-            category: "Maison & D\xE9co",
-            location: "Lyon",
-            condition: "Tr\xE8s bon \xE9tat",
-            image_url: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?w=800&auto=format&fit=crop&q=80",
-            video_url: "",
-            size: "180x45x75 cm",
-            color: "Miel / Teck",
-            quantity: 1,
-            additional_images: [],
-            seller_name: "Marc Dupuis",
-            seller_email: "marc.dupuis@outlook.fr",
-            seller_phone: "06 12 34 56 78",
-            created_at: new Date(Date.now() - 36e5 * 2).toISOString(),
-            is_sold: false,
-            is_sponsored: true
-          },
-          {
-            id: "2",
-            title: "Appareil photo reflex Canon EOS 80D",
-            description: "Vendu avec objectif EFS 18-135mm, sacoche de transport, batterie et chargeur. Parfait pour d\xE9buter en photographie.",
-            price: 550,
-            category: "\xC9lectronique",
-            location: "Paris",
-            condition: "Comme neuf",
-            image_url: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&auto=format&fit=crop&q=80",
-            video_url: "",
-            size: "N/A",
-            color: "Noir",
-            quantity: 1,
-            additional_images: [],
-            seller_name: "Sophie B.",
-            seller_email: "sophie.b69@gmail.com",
-            seller_phone: "06 98 76 54 32",
-            created_at: new Date(Date.now() - 36e5 * 12).toISOString(),
-            is_sold: false,
-            is_sponsored: false
-          },
-          {
-            id: "3",
-            title: "Collection de Vinyles Rock Classique (x10)",
-            description: "Lot de 10 vinyles rock (Pink Floyd, Led Zeppelin, The Rolling Stones...). Pochettes en bon \xE9tat, disques sans rayures majeures.",
-            price: 120,
-            category: "Livres & Culture",
-            location: "Bordeaux",
-            condition: "Bon \xE9tat",
-            image_url: "https://images.unsplash.com/photo-1539635278303-d4002c07eae3?w=800&auto=format&fit=crop&q=80",
-            video_url: "",
-            size: "12 pouces",
-            color: "Noir",
-            quantity: 1,
-            additional_images: [],
-            seller_name: "Jean Testeur",
-            seller_email: "jean.testeur@gmail.com",
-            seller_phone: "07 11 22 33 44",
-            created_at: new Date(Date.now() - 36e5 * 24).toISOString(),
-            is_sold: false,
-            is_sponsored: false
-          }
-        ],
-        demands: [
-          {
-            id: "demand_1",
-            title: "Recherche Canap\xE9 Togo Ligne Roset",
-            description: "Je recherche activement un canap\xE9 Togo de chez Ligne Roset, de pr\xE9f\xE9rence en velours ou cuir, couleur chaud (orange, marron ou beige). Budget flexible selon l'\xE9tat.",
-            desired_price: 1500,
-            quantity: 1,
-            size: "3 places ou angle",
-            color: "Chaud",
-            other_specs: "Authentique avec \xE9tiquette",
-            image_url: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800&auto=format&fit=crop&q=80",
-            buyer_email: "pierre.m@gmail.com",
-            buyer_name: "Pierre M.",
-            created_at: new Date(Date.now() - 36e5 * 4).toISOString()
-          }
-        ],
-        chats: [
-          {
-            id: "chat_1",
-            listing_id: "1",
-            listing_title: "Enfilade scandinave en teck vintage",
-            listing_price: 480,
-            listing_image_url: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?w=800&auto=format&fit=crop&q=80",
-            seller_email: "marc.dupuis@outlook.fr",
-            seller_name: "Marc Dupuis",
-            buyer_email: "antigravity@la-brocante.fr",
-            buyer_name: "Agent Antigravity \u{1F916}",
-            last_message_at: new Date(Date.now() - 36e5 * 2).toISOString(),
-            messages: [
-              {
-                id: "msg_1",
-                senderEmail: "antigravity@la-brocante.fr",
-                senderName: "Agent Antigravity \u{1F916}",
-                text: "Bonjour Marc ! Votre enfilade scandinave en teck est vraiment magnifique. Est-elle toujours disponible ?",
-                createdAt: new Date(Date.now() - 36e5 * 2 - 6e4).toISOString(),
-                isRead: true
-              },
-              {
-                id: "msg_2",
-                senderEmail: "marc.dupuis@outlook.fr",
-                senderName: "Marc Dupuis",
-                text: "Bonjour ! Oui, elle est toujours disponible et visible sur Lyon 3e.",
-                createdAt: new Date(Date.now() - 36e5 * 2).toISOString(),
-                isRead: false
-              }
-            ],
-            requested_quantity: 1
-          }
-        ],
-        users: [
-          { email: "fd6016826@gmail.com", name: "Fallou Diouf", avatar: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g1' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23fbbf24'/><stop offset='100%' stop-color='%23d97706'/></linearGradient></defs><rect width='100' height='100' rx='28' fill='url(%23g1)'/><g fill='none' stroke='%23ffffff' stroke-width='5.5' stroke-linecap='round' stroke-linejoin='round'><path d='M30 42h40v30c0 4-3 7-7 7H37c-4 0-7-3-7-7V42z'/><path d='M40 42c0-5 3-9 10-9s10 4 10 9'/><circle cx='50' cy='58' r='4' fill='%23ffffff'/></g></svg>", password: "Diouffallou@2004", isPro: true, pref_notif_announcements: true },
-          { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop", password: "123456", pref_notif_announcements: true },
-          { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop", password: "123456", pref_notif_announcements: true }
-        ]
-      };
-      import_fs.default.writeFileSync(localDbPath, JSON.stringify(defaultData, null, 2));
+      try {
+        import_fs.default.writeFileSync(localDbPath, JSON.stringify(defaultData, null, 2));
+      } catch (err) {
+      }
+      inMemoryDb = defaultData;
+      return inMemoryDb;
     }
     const data = import_fs.default.readFileSync(localDbPath, "utf-8");
     const parsed = JSON.parse(data);
     let dbUpdated = false;
     if (!parsed.users) {
-      parsed.users = [
-        { email: "fd6016826@gmail.com", name: "Fallou Diouf", avatar: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g1' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23fbbf24'/><stop offset='100%' stop-color='%23d97706'/></linearGradient></defs><rect width='100' height='100' rx='28' fill='url(%23g1)'/><g fill='none' stroke='%23ffffff' stroke-width='5.5' stroke-linecap='round' stroke-linejoin='round'><path d='M30 42h40v30c0 4-3 7-7 7H37c-4 0-7-3-7-7V42z'/><path d='M40 42c0-5 3-9 10-9s10 4 10 9'/><circle cx='50' cy='58' r='4' fill='%23ffffff'/></g></svg>", password: "Diouffallou@2004", isPro: true, pref_notif_announcements: true },
-        { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop", password: "123456", pref_notif_announcements: true },
-        { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop", password: "123456", pref_notif_announcements: true }
-      ];
+      parsed.users = defaultData.users;
       dbUpdated = true;
     }
     if (!parsed.notifications) {
@@ -219,19 +224,23 @@ function readLocalDb() {
       dbUpdated = true;
     }
     if (dbUpdated) {
-      import_fs.default.writeFileSync(localDbPath, JSON.stringify(parsed, null, 2));
+      try {
+        import_fs.default.writeFileSync(localDbPath, JSON.stringify(parsed, null, 2));
+      } catch (err) {
+      }
     }
-    return parsed;
+    inMemoryDb = parsed;
+    return inMemoryDb;
   } catch (err) {
-    console.error("Error reading local_db.json, returning empty structure:", err);
-    return { listings: [], demands: [], chats: [], users: [], notifications: [] };
+    inMemoryDb = defaultData;
+    return defaultData;
   }
 }
 function writeLocalDb(data) {
+  inMemoryDb = data;
   try {
     import_fs.default.writeFileSync(localDbPath, JSON.stringify(data, null, 2));
   } catch (err) {
-    console.error("Error writing to local_db.json:", err);
   }
 }
 async function checkIsProUser(email) {
@@ -2046,7 +2055,7 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
         db.notifications = (db.notifications || []).filter((n) => n.user_email.toLowerCase().trim() !== cleanEmail);
         writeLocalDb(db);
       } else {
-        const { error } = await supabaseClient.from("notifications").delete().eq("user_email", cleanEmail);
+        const { error } = await supabase.from("notifications").delete().eq("user_email", cleanEmail);
         if (error) {
           console.warn("Supabase notifications delete error, clearing local cache:", error.message);
         }
@@ -2078,7 +2087,7 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
         });
         writeLocalDb(db);
       } else {
-        const { error } = await supabaseClient.from("notifications").update({ read: true }).eq("user_email", cleanEmail);
+        const { error } = await supabase.from("notifications").update({ read: true }).eq("user_email", cleanEmail);
         if (error) {
           console.warn("Supabase notifications update error, marking local cache:", error.message);
         }
@@ -2114,7 +2123,7 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
         writeLocalDb(db);
       }
       if (!useLocalDb) {
-        const { error } = await supabaseClient.from("profiles").update(updates).eq("email", cleanEmail);
+        const { error } = await supabase.from("profiles").update(updates).eq("email", cleanEmail);
         if (error) {
           console.warn("Supabase preferences update error:", error.message);
         }
@@ -2146,10 +2155,10 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
         chats = db.chats || [];
         demands = db.demands || [];
       } else {
-        const { data: dbUsers } = await supabaseClient.from("profiles").select("*");
-        const { data: dbListings } = await supabaseClient.from("listings").select("*");
-        const { data: dbChats } = await supabaseClient.from("chats").select("*");
-        const { data: dbDemands } = await supabaseClient.from("demands").select("*");
+        const { data: dbUsers } = await supabase.from("profiles").select("*");
+        const { data: dbListings } = await supabase.from("listings").select("*");
+        const { data: dbChats } = await supabase.from("chats").select("*");
+        const { data: dbDemands } = await supabase.from("demands").select("*");
         users = dbUsers || [];
         listings = dbListings || [];
         chats = dbChats || [];
@@ -2188,7 +2197,7 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
         const db = readLocalDb();
         userEmails = (db.users || []).map((u) => u.email);
       } else {
-        const { data: profiles } = await supabaseClient.from("profiles").select("email");
+        const { data: profiles } = await supabase.from("profiles").select("email");
         userEmails = (profiles || []).map((p) => p.email);
       }
       const newNotifs = userEmails.map((email) => ({
@@ -2206,7 +2215,7 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
         db.notifications.push(...newNotifs);
         writeLocalDb(db);
       } else {
-        const { error } = await supabaseClient.from("notifications").insert(newNotifs);
+        const { error } = await supabase.from("notifications").insert(newNotifs);
         if (error) {
           console.warn("Supabase notification broadcast error, using local fallback:", error.message);
           const db = readLocalDb();
@@ -2229,7 +2238,7 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
         db.listings = (db.listings || []).filter((l) => l.id !== id);
         writeLocalDb(db);
       } else {
-        const { error } = await supabaseClient.from("listings").delete().eq("id", id);
+        const { error } = await supabase.from("listings").delete().eq("id", id);
         if (error) throw error;
       }
       res.json({ success: true, message: "Annonce supprim\xE9e par l'administrateur." });
@@ -2253,8 +2262,8 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
         db.chats = (db.chats || []).filter((c) => c.seller_email?.toLowerCase().trim() !== cleanEmail && c.buyer_email?.toLowerCase().trim() !== cleanEmail);
         writeLocalDb(db);
       } else {
-        await supabaseClient.from("listings").delete().eq("seller_email", cleanEmail);
-        await supabaseClient.from("profiles").delete().eq("email", cleanEmail);
+        await supabase.from("listings").delete().eq("seller_email", cleanEmail);
+        await supabase.from("profiles").delete().eq("email", cleanEmail);
       }
       res.json({ success: true, message: "Compte utilisateur supprim\xE9 avec succ\xE8s." });
     } catch (err) {
