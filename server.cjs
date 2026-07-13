@@ -38,6 +38,7 @@ var import_path = __toESM(require("path"), 1);
 var import_fs = __toESM(require("fs"), 1);
 var import_url = require("url");
 var import_dotenv = __toESM(require("dotenv"), 1);
+var import_cors = __toESM(require("cors"), 1);
 var import_genai = require("@google/genai");
 var import_supabase_js = require("@supabase/supabase-js");
 var import_meta = {};
@@ -670,6 +671,12 @@ try {
   console.warn("Could not create uploads directory (expected on read-only serverless platforms like Vercel):", err);
 }
 var app = (0, import_express.default)();
+app.use((0, import_cors.default)({
+  origin: true,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-CSRF-Token", "Accept", "Accept-Version", "Content-Length", "Content-MD5", "Date", "X-Api-Version"]
+}));
 var supabaseChecked = false;
 async function checkSupabaseConnection() {
   if (supabaseChecked) return;
@@ -695,7 +702,7 @@ app.use(async (req, res, next) => {
 app.use(import_express.default.json({ limit: "15mb" }));
 app.use(import_express.default.urlencoded({ extended: true, limit: "15mb" }));
 app.use("/uploads", import_express.default.static(UPLOADS_DIR));
-async function start() {
+function start() {
   app.get("/api/listings", async (req, res) => {
     try {
       const { q, category, minPrice, maxPrice, location, condition, sellerEmail } = req.query;
@@ -2267,24 +2274,38 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
       res.status(500).json({ error: "Erreur serveur." });
     }
   });
-  if (!process.env.VERCEL) {
-    if (process.env.NODE_ENV !== "production") {
-      const { createServer: createViteServer } = await import("vite");
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa"
-      });
-      app.use(vite.middlewares);
-    } else {
-      const distPath = import_path.default.join(process.cwd(), "dist");
-      app.use(import_express.default.static(distPath));
-      app.get("*", (req, res) => {
-        res.sendFile(import_path.default.join(distPath, "index.html"));
+  app.use("/api/*", (req, res) => {
+    res.status(404).json({ error: "Route API non trouv\xE9e." });
+  });
+  app.use((err, req, res, next) => {
+    console.error("[Unhandled Server Error]:", err);
+    if (!res.headersSent) {
+      res.status(err.status || 500).json({
+        error: "Erreur interne du serveur.",
+        message: process.env.NODE_ENV === "production" ? "Une erreur inattendue est survenue." : err.message || String(err)
       });
     }
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`[Brocante Server] Running at http://localhost:${PORT}`);
-    });
+  });
+  if (!process.env.VERCEL) {
+    (async () => {
+      if (process.env.NODE_ENV !== "production") {
+        const { createServer: createViteServer } = await import("vite");
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: "spa"
+        });
+        app.use(vite.middlewares);
+      } else {
+        const distPath = import_path.default.join(process.cwd(), "dist");
+        app.use(import_express.default.static(distPath));
+        app.get("*", (req, res) => {
+          res.sendFile(import_path.default.join(distPath, "index.html"));
+        });
+      }
+      app.listen(PORT, "0.0.0.0", () => {
+        console.log(`[Brocante Server] Running at http://localhost:${PORT}`);
+      });
+    })();
   }
 }
 start();

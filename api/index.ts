@@ -1,47 +1,43 @@
-// Vercel serverless function entry point
-// This file imports the compiled Express server from server.cjs
-
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-let app: any;
+let appInstance: any;
 
-// Lazy load the server on first request
 async function loadServer() {
-  if (!app) {
-    try {
-      const serverModule = await import('../server.cjs');
-      app = serverModule.default || serverModule;
-      console.log('[API] Server loaded successfully');
-    } catch (err: any) {
-      console.error('[API] Failed to load server:', err);
-      throw err;
-    }
+  if (!appInstance) {
+    const serverModule = await import('../server.cjs');
+    appInstance = serverModule.default || serverModule;
   }
-  return app;
+  return appInstance;
 }
 
-// Handle all API requests
-export default async (req: VercelRequest, res: VercelResponse) => {
-  try {
-    const server = await loadServer();
-    
-    // Set CORS headers if needed
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-email');
-    
-    if (req.method === 'OPTIONS') {
-      res.status(200).end();
-      return;
-    }
-    
-    // Route to Express server
-    return server(req, res);
-  } catch (error: any) {
-    console.error('[API] Error:', error);
-    res.status(500).json({
-      error: 'Erreur serveur interne',
-      message: error?.message || 'Une erreur est survenue lors du traitement de votre demande'
-    });
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Ensure CORS headers are attached on all Vercel responses
+  const origin = (req.headers as any)?.origin || "*";
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, x-admin-email"
+  );
+
+  // Directly answer HTTP OPTIONS preflight requests
+  if (req.method === "OPTIONS") {
+    res.status(200).end();
+    return;
   }
-};
+
+  try {
+    const app = await loadServer();
+    return await app(req, res);
+  } catch (error: any) {
+    console.error("[Vercel Serverless Handler Error]:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Erreur du serveur Vercel Serverless.",
+        message: process.env.NODE_ENV === "production" ? "Une erreur inattendue est survenue." : (error.message || String(error))
+      });
+    }
+  }
+}
+

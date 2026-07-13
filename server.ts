@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import cors from "cors";
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 
@@ -719,6 +720,14 @@ try {
 }
 
 const app = express();
+
+// Enable CORS for all origins and options preflight requests
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-CSRF-Token", "Accept", "Accept-Version", "Content-Length", "Content-MD5", "Date", "X-Api-Version"]
+}));
 
 let supabaseChecked = false;
 async function checkSupabaseConnection() {
@@ -2704,6 +2713,22 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     } catch (err: any) {
       console.error("Error admin updating pro status:", err);
       res.status(500).json({ error: "Erreur serveur." });
+    }
+  });
+
+  // Global 404 handler for API routes
+  app.use("/api/*", (req, res) => {
+    res.status(404).json({ error: "Route API non trouvée." });
+  });
+
+  // Global error handling middleware for Express
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("[Unhandled Server Error]:", err);
+    if (!res.headersSent) {
+      res.status(err.status || 500).json({
+        error: "Erreur interne du serveur.",
+        message: process.env.NODE_ENV === "production" ? "Une erreur inattendue est survenue." : (err.message || String(err))
+      });
     }
   });
 
