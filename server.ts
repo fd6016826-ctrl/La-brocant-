@@ -861,8 +861,9 @@ function start() {
 
       res.json(listings);
     } catch (err: any) {
-      console.error("Error loading listings from Supabase:", err);
-      res.status(500).json({ error: "Impossible de charger les annonces." });
+      console.warn("Error loading listings from Supabase, returning local fallback:", err.message || err);
+      const db = readLocalDb();
+      res.json((db.listings || []).map(mapListingFromDb));
     }
   });
 
@@ -990,9 +991,10 @@ function start() {
       const { data: dbDemands, error } = await supabase.from("demands").select("*").order("created_at", { ascending: false });
       if (error) throw error;
       res.json((dbDemands || []).map(mapDemandFromDb));
-    } catch (err) {
-      console.error("Error loading demands from Supabase:", err);
-      res.status(500).json({ error: "Impossible de charger les demandes d'achat." });
+    } catch (err: any) {
+      console.warn("Error loading demands from Supabase, returning local fallback:", err.message || err);
+      const db = readLocalDb();
+      res.json((db.demands || []).map(mapDemandFromDb));
     }
   });
 
@@ -2343,8 +2345,16 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
 
       res.json(uiNotifs);
     } catch (err: any) {
-      console.error("Error fetching notifications:", err);
-      res.status(500).json({ error: "Erreur lors du chargement des notifications." });
+      console.warn("Error fetching notifications, returning empty local fallback:", err.message || err);
+      const db = readLocalDb();
+      res.json((db.notifications || []).map((n: any) => ({
+        id: n.id,
+        title: n.title,
+        message: n.message,
+        time: n.created_at ? new Date(n.created_at).toLocaleString("fr-FR") : "À l'instant",
+        type: n.type,
+        read: n.read === true
+      })));
     }
   });
 

@@ -768,8 +768,9 @@ function start() {
       }
       res.json(listings);
     } catch (err) {
-      console.error("Error loading listings from Supabase:", err);
-      res.status(500).json({ error: "Impossible de charger les annonces." });
+      console.warn("Error loading listings from Supabase, returning local fallback:", err.message || err);
+      const db = readLocalDb();
+      res.json((db.listings || []).map(mapListingFromDb));
     }
   });
   app.post("/api/listings", async (req, res) => {
@@ -874,8 +875,9 @@ function start() {
       if (error) throw error;
       res.json((dbDemands || []).map(mapDemandFromDb));
     } catch (err) {
-      console.error("Error loading demands from Supabase:", err);
-      res.status(500).json({ error: "Impossible de charger les demandes d'achat." });
+      console.warn("Error loading demands from Supabase, returning local fallback:", err.message || err);
+      const db = readLocalDb();
+      res.json((db.demands || []).map(mapDemandFromDb));
     }
   });
   app.post("/api/demands", async (req, res) => {
@@ -1965,8 +1967,16 @@ En tant qu'acheteur int\xE9ress\xE9 par "${listing.title}", je vous propose un a
       }));
       res.json(uiNotifs);
     } catch (err) {
-      console.error("Error fetching notifications:", err);
-      res.status(500).json({ error: "Erreur lors du chargement des notifications." });
+      console.warn("Error fetching notifications, returning empty local fallback:", err.message || err);
+      const db = readLocalDb();
+      res.json((db.notifications || []).map((n) => ({
+        id: n.id,
+        title: n.title,
+        message: n.message,
+        time: n.created_at ? new Date(n.created_at).toLocaleString("fr-FR") : "\xC0 l'instant",
+        type: n.type,
+        read: n.read === true
+      })));
     }
   });
   app.patch("/api/notifications/:id/read", async (req, res) => {
