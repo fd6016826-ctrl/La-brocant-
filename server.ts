@@ -798,9 +798,18 @@ function start() {
 
   // --- API DEFINITIONS ---
 
-  // 0. Vercel Cron Job — Daily Maintenance at 10:00 UTC
+  // 0. Vercel Cron Job — Daily Maintenance at 10:00 UTC (Secured with CRON_SECRET)
   app.get("/api/cron", async (req, res) => {
     try {
+      const authHeader = req.headers.authorization || req.headers["authorization"];
+      const cronSecret = process.env.CRON_SECRET;
+
+      // Verify Authorization header if CRON_SECRET environment variable is set
+      if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+        res.status(401).send("Unauthorized");
+        return;
+      }
+
       console.log("[Vercel Cron] Daily maintenance executed successfully at 10:00 UTC.");
       res.json({ ok: true, message: "Tâche cron exécutée avec succès." });
     } catch (err: any) {
