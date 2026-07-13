@@ -798,6 +798,17 @@ function start() {
 
   // --- API DEFINITIONS ---
 
+  // 0. Vercel Cron Job — Daily Maintenance at 10:00 UTC
+  app.get("/api/cron", async (req, res) => {
+    try {
+      console.log("[Vercel Cron] Daily maintenance executed successfully at 10:00 UTC.");
+      res.json({ ok: true, message: "Tâche cron exécutée avec succès." });
+    } catch (err: any) {
+      console.error("[Vercel Cron Error]:", err);
+      res.status(500).json({ error: "Erreur lors de l'exécution de la tâche cron." });
+    }
+  });
+
   // 1. Get Listings with rich filters
   app.get("/api/listings", async (req, res) => {
     try {
