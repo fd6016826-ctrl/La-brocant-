@@ -11,7 +11,7 @@ import { z } from "zod";
 
 dotenv.config();
 
-// PayTech Configuration (OM / Wave) - Loaded strictly from environment
+// PayTech Configuration (OM / Wave) - Loaded strictly from Vercel/Local env variables
 const PAYTECH_API_KEY = process.env.PAYTECH_API_KEY || "";
 const PAYTECH_API_SECRET = process.env.PAYTECH_API_SECRET || "";
 const PAYTECH_ENV = process.env.PAYTECH_ENV || "prod";
