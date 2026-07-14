@@ -1041,7 +1041,9 @@ function start() {
           "Accept": "application/json",
           "Content-Type": "application/json",
           "API_KEY": PAYTECH_API_KEY,
-          "API_SECRET": PAYTECH_API_SECRET
+          "API_SECRET": PAYTECH_API_SECRET,
+          "api_key": PAYTECH_API_KEY,
+          "api_secret": PAYTECH_API_SECRET
         },
         body: JSON.stringify(payload)
       });
@@ -1051,8 +1053,9 @@ function start() {
       if (data && (data.success === 1 || data.success === "1")) {
         res.json({ success: true, redirect_url: data.redirect_url });
       } else {
-        console.error("[PayTech Error] Response details:", data);
-        res.status(500).json({ error: "Échec de l'initialisation du paiement PayTech.", details: data });
+        console.error("[PayTech Error Response]:", data);
+        const detailMsg = data?.message || data?.error || (typeof data === "string" ? data : JSON.stringify(data));
+        res.status(400).json({ error: `PayTech: ${detailMsg}` });
       }
     } catch (err: any) {
       console.error("[PayTech Subscribe Server Error]:", err.message || err);
