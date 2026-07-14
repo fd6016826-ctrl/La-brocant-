@@ -85,7 +85,7 @@ if (supabaseUrl && supabaseKey) {
     console.warn("[Brocante] Erreur lors de l'instanciation du client Supabase:", err);
   }
 } else {
-  console.warn("AVERTISSEMENT: SUPABASE_URL ou SUPABASE_SECRET_KEY est manquant dans les variables d'environnement. Fallback local actif.");
+  console.error("[CRITICAL WARNING] SUPABASE_URL ou SUPABASE_SECRET_KEY est absent de vos variables d'environnement Vercel ! Le serveur bascule en mode local. Sur Vercel (disque en lecture seule), cela va empêcher l'authentification et l'écriture de données. Veuillez configurer vos variables Supabase dans la console Vercel.");
 }
 
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "fd6016826@gmail.com").trim().toLowerCase();
