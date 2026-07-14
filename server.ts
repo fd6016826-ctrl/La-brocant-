@@ -6,8 +6,17 @@ import dotenv from "dotenv";
 import cors from "cors";
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
+import crypto from "crypto";
 
 dotenv.config();
+
+// PayTech Configuration (OM / Wave)
+const PAYTECH_API_KEY = process.env.PAYTECH_API_KEY || "a7f6253a29e79d2cbf83108b35946c85decac7eeb93872369ac22be47a509d4e";
+const PAYTECH_API_SECRET = process.env.PAYTECH_API_SECRET || "79b57d93b60b84ee7591ea3405acc08e6fdfa2dec785ca0c2cbab595489eb3e2";
+const PAYTECH_ENV = process.env.PAYTECH_ENV || "test";
+const PAYTECH_IPN_URL = process.env.PAYTECH_IPN_URL || "https://la-brocant.vercel.app/api/payment/ipn";
+const PAYTECH_SUCCESS_URL = process.env.PAYTECH_SUCCESS_URL || "https://la-brocant.vercel.app/profile?payment=success";
+const PAYTECH_CANCEL_URL = process.env.PAYTECH_CANCEL_URL || "https://la-brocant.vercel.app/profile?payment=cancel";
 
 const localFilename = typeof __filename !== "undefined"
   ? __filename
@@ -815,6 +824,118 @@ function start() {
     } catch (err: any) {
       console.error("[Vercel Cron Error]:", err);
       res.status(500).json({ error: "Erreur lors de l'exécution de la tâche cron." });
+    }
+  });
+
+  // --- PAYTECH SUBSCRIPTION ROUTES ---
+
+  // 1. Initiate PayTech checkout session (OM / Wave)
+  app.post("/api/payment/subscribe", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        res.status(400).json({ error: "Email utilisateur requis." });
+        return;
+      }
+
+      const cleanEmail = email.toLowerCase().trim();
+      const refCommand = `sub_${Date.now()}`;
+
+      // Config payload according to PayTech parameters
+      const payload = {
+        item_name: "Abonnement Brocante PRO (Mensuel)",
+        item_price: "3270", // ~ 4.99 € (1 € = 655.95 XOF)
+        currency: "XOF",
+        ref_command: refCommand,
+        ipn_url: PAYTECH_IPN_URL,
+        success_url: PAYTECH_SUCCESS_URL,
+        cancel_url: PAYTECH_CANCEL_URL,
+        custom_field: cleanEmail,
+        env: PAYTECH_ENV
+      };
+
+      const response = await fetch("https://paytech.sn/api/payment/request-payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "API_KEY": PAYTECH_API_KEY,
+          "API_SECRET": PAYTECH_API_SECRET
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data: any = await response.json();
+
+      if (data && (data.success === 1 || data.success === "1")) {
+        res.json({ success: true, redirect_url: data.redirect_url });
+      } else {
+        console.error("[PayTech Error] Response details:", data);
+        res.status(500).json({ error: "Échec de l'initialisation du paiement PayTech.", details: data });
+      }
+    } catch (err: any) {
+      console.error("[PayTech Subscribe Server Error]:", err.message || err);
+      res.status(500).json({ error: "Erreur serveur lors de l'initiation de la souscription." });
+    }
+  });
+
+  // 2. Instant Payment Notification (IPN) Callback
+  app.post("/api/payment/ipn", async (req, res) => {
+    try {
+      const { api_key_sha256, api_secret_sha256, ref_command, item_price, custom_field } = req.body;
+
+      // Compute hash signatures
+      const expectedKeyHash = crypto.createHash("sha256").update(PAYTECH_API_KEY).digest("hex");
+      const expectedSecretHash = crypto.createHash("sha256").update(PAYTECH_API_SECRET).digest("hex");
+
+      // Verify signatures
+      if (api_key_sha256 !== expectedKeyHash || api_secret_sha256 !== expectedSecretHash) {
+        console.warn("[PayTech IPN Warning] Access Denied: invalid signature.");
+        res.status(401).send("Unauthorized signature");
+        return;
+      }
+
+      console.log(`[PayTech IPN Success] Transaction command ${ref_command} approved for user ${custom_field}.`);
+
+      const cleanEmail = String(custom_field || "").toLowerCase().trim();
+      if (cleanEmail) {
+        // 1. Update status in local fallback DB
+        const db = readLocalDb();
+        if (!db.users) db.users = [];
+        const idx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+        if (idx !== -1) {
+          db.users[idx].isPro = true;
+          writeLocalDb(db);
+        } else {
+          db.users.push({
+            email: cleanEmail,
+            name: cleanEmail.split("@")[0],
+            isPro: true
+          });
+          writeLocalDb(db);
+        }
+
+        // 2. Sync to Supabase profile
+        if (!useLocalDb && supabaseClient) {
+          try {
+            await supabaseClient.from("profiles").update({ is_pro: true }).eq("email", cleanEmail);
+          } catch (supErr) {
+            console.warn("[PayTech IPN Supabase Sync Warning] profiles updates skipped:", supErr);
+          }
+        }
+
+        // 3. Send system notification to user
+        await createNotification(
+          cleanEmail,
+          "Abonnement PRO Actif ! 👑",
+          "Félicitations, votre abonnement Brocante PRO a été activé avec succès via PayTech. Profitez dès maintenant de tous vos avantages !",
+          "system"
+        );
+      }
+
+      res.status(200).send("OK");
+    } catch (err: any) {
+      console.error("[PayTech IPN Processing Error]:", err.message || err);
+      res.status(500).send("Internal server error");
     }
   });
 
