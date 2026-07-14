@@ -927,8 +927,13 @@ function start() {
           const fileName = `annonce_${id}.${fileExtension}`;
           const filePath = path.join(UPLOADS_DIR, fileName);
 
-          fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
-          finalImageUrl = `/uploads/${fileName}`;
+          try {
+            fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
+            finalImageUrl = `/uploads/${fileName}`;
+          } catch (err) {
+            console.warn("[Vercel Upload Fallback] Impossible d'écrire l'image principale. Utilisation de la Data URL base64.");
+            finalImageUrl = imageUrl;
+          }
         }
       }
 
@@ -944,8 +949,13 @@ function start() {
           const fileName = `video_${id}.${fileExtension}`;
           const filePath = path.join(UPLOADS_DIR, fileName);
 
-          fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
-          finalVideoUrl = `/uploads/${fileName}`;
+          try {
+            fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
+            finalVideoUrl = `/uploads/${fileName}`;
+          } catch (err) {
+            console.warn("[Vercel Upload Fallback] Impossible d'écrire la vidéo. Utilisation de la Data URL base64.");
+            finalVideoUrl = videoUrl;
+          }
         }
       }
 
@@ -962,8 +972,13 @@ function start() {
               const fileName = `annonce_${id}_extra_${idx}.${fileExtension}`;
               const filePath = path.join(UPLOADS_DIR, fileName);
 
-              fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
-              return `/uploads/${fileName}`;
+              try {
+                fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
+                return `/uploads/${fileName}`;
+              } catch (err) {
+                console.warn("[Vercel Upload Fallback] Impossible d'écrire l'image additionnelle " + idx + ". Utilisation de la Data URL.");
+                return imgUrl;
+              }
             }
           }
           return imgUrl;
@@ -1051,8 +1066,13 @@ function start() {
           const fileName = `demande_${id}.${fileExtension}`;
           const filePath = path.join(UPLOADS_DIR, fileName);
 
-          fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
-          finalImageUrl = `/uploads/${fileName}`;
+          try {
+            fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
+            finalImageUrl = `/uploads/${fileName}`;
+          } catch (err) {
+            console.warn("[Vercel Upload Fallback] Impossible d'écrire l'image de la demande. Utilisation de la Data URL.");
+            finalImageUrl = imageUrl;
+          }
         }
       }
 
