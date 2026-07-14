@@ -817,12 +817,6 @@ function mapChatFromDb(dbChat: any): any {
 const PORT = 3000;
 const UPLOADS_DIR = path.join(localDirname, "uploads");
 
-try {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-} catch (err) {
-  console.warn("Could not create uploads directory (expected on read-only serverless platforms like Vercel):", err);
-}
-
 const app = express();
 
 // Enable CORS for all origins and options preflight requests
