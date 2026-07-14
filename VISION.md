@@ -145,3 +145,22 @@ Pour valider et profiter de ces changements, voici ce que vous devez faire :
     - Transition du flux principal d'inscription et de connexion vers Email + Mot de passe (avec validation stricte de **6 caractères minimum**).
     - **Vérification OTP obligatoire** : Les endpoints `POST /api/auth/signup` et `POST /api/auth/login` enregistrent les tentatives en mémoire (`pendingRegistrations`, `pendingLogins`) et déclenchent l'envoi d'un OTP à 6 chiffres vers l'adresse e-mail (via Supabase ou fallback simulé). L'application n'est plus court-circuitée directement ; l'utilisateur doit obligatoirement saisir le code OTP pour finaliser et valider la session dans `POST /api/auth/verify-otp`.
 
+---
+
+## 6. Modifications Récentes (Paiements, Abonnements PRO & Vercel)
+
+### Intégration de PayTech (Wave / Orange Money)
+* **Intégration Mobile Money** : Ajout de l'onglet Mobile Money (Wave & Orange Money) dans le modal d'abonnement `PremiumUpgradeModal.tsx`, redirigeant l'utilisateur de manière sécurisée vers PayTech.
+* **Correction du Format du Prix** : Modification du format de `item_price` dans l'API de souscription. En envoyant `3270` en tant que type `number` (et non de type `string`), PayTech n'a plus le bug qui forçait la transaction de test à 100 francs CFA par défaut.
+
+### Persistance & Synchronisation PRO sur Supabase
+* **Base de données robuste** : Le statut PRO de l'utilisateur n'est plus volatile. Nous l'enregistrons directement dans Supabase dans la table `profiles` (champs `is_pro` et `pro_expires_at`).
+* **Vérification en temps réel** : Le client React interroge le serveur en arrière-plan toutes les 15 secondes via l'API `/api/users/:email/pro-status` pour s'assurer que le statut affiché est toujours synchronisé avec l'état réel de l'abonnement.
+* **Contrôle d'Expiration Mensuelle** : À chaque vérification de statut, le serveur backend évalue la date `pro_expires_at`. Si l'abonnement est expiré, le statut `is_pro` repasse automatiquement à `false` dans la base de données.
+
+### Optimisations Vercel (Lecture seule & Redirections)
+* **URLs de Redirection Dynamiques** : Les adresses de redirection (`success_url`, `cancel_url`) et de notification (`ipn_url`) transmises à PayTech sont générées dynamiquement en analysant l'hôte de la requête entrante (`req.headers.host`). Le site s'adapte automatiquement à n'importe quel domaine Vercel ou de développement.
+* **Mode Réel par Défaut** : La configuration de production réelle (`PAYTECH_ENV=prod`) s'active désormais par défaut si aucune variable d'environnement n'est configurée sur Vercel, afin de simplifier le déploiement.
+* **Résolution de l'avertissement de fichier d'écriture** : Suppression de l'appel à `fs.mkdirSync` pour le dossier `uploads` obsolète au démarrage du serveur. Cela évite d'encombrer les logs Vercel d'avertissements liés au système de fichiers en lecture seule.
+
+
