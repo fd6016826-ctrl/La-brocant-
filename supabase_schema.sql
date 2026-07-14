@@ -165,7 +165,7 @@ DROP POLICY IF EXISTS "Allow user read access to notifications" ON public.notifi
 CREATE POLICY "Allow user read access to notifications" ON public.notifications FOR SELECT USING (user_email = auth.jwt()->>'email');
 
 DROP POLICY IF EXISTS "Allow system insert access to notifications" ON public.notifications;
-CREATE POLICY "Allow system insert access to notifications" ON public.notifications FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow system insert access to notifications" ON public.notifications FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
 DROP POLICY IF EXISTS "Allow user update access to notifications" ON public.notifications;
 CREATE POLICY "Allow user update access to notifications" ON public.notifications FOR UPDATE USING (user_email = auth.jwt()->>'email') WITH CHECK (user_email = auth.jwt()->>'email');
