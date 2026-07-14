@@ -245,36 +245,97 @@ function writeLocalDb(data: { listings: any[]; demands: any[]; chats: any[]; use
   }
 }
 
-// Helper to determine if user is Pro
+// Helper to determine if user is Pro (checking expiration date)
 async function checkIsProUser(email: string): Promise<boolean> {
   const cleanEmail = email.toLowerCase().trim();
   if (cleanEmail.includes("pro") || cleanEmail.includes("sophie")) {
     return true;
   }
   try {
+    let isPro = false;
+    let proExpiresAt: string | null = null;
+
     if (useLocalDb || !supabaseClient) {
       const db = readLocalDb();
       const user = (db.users || []).find((u: any) => u.email.toLowerCase().trim() === cleanEmail);
-      return !!(user && user.isPro);
+      if (user) {
+        isPro = !!user.isPro;
+        proExpiresAt = user.proExpiresAt || null;
+      }
     } else {
       // 1. Check in profiles on Supabase
       const { data: profile, error } = await supabaseClient
         .from("profiles")
-        .select("is_pro")
+        .select("is_pro, pro_expires_at")
         .eq("email", cleanEmail)
         .maybeSingle();
 
-      if (!error && profile && typeof profile.is_pro === "boolean") {
-        return profile.is_pro;
+      if (!error && profile) {
+        isPro = !!profile.is_pro;
+        proExpiresAt = profile.pro_expires_at || null;
       }
-
-      // 2. Check local fallback
-      const db = readLocalDb();
-      const user = (db.users || []).find((u: any) => u.email.toLowerCase().trim() === cleanEmail);
-      return !!(user && user.isPro);
     }
+
+    if (isPro) {
+      if (proExpiresAt) {
+        const expireDate = new Date(proExpiresAt);
+        if (new Date() > expireDate) {
+          // Subscription expired
+          console.log(`[Subscription Expired] PRO access expired for user ${cleanEmail}. Removing PRO status.`);
+          await updateUserProStatus(cleanEmail, false, null);
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
   } catch (e) {
     return false;
+  }
+}
+
+// Helper to update user PRO status and expiration date in local database & Supabase
+async function updateUserProStatus(email: string, isPro: boolean, expiresAt: Date | null): Promise<void> {
+  const cleanEmail = email.toLowerCase().trim();
+  const expiresAtStr = expiresAt ? expiresAt.toISOString() : null;
+
+  // 1. Update local database
+  const db = readLocalDb();
+  if (!db.users) db.users = [];
+  const idx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+  if (idx !== -1) {
+    db.users[idx].isPro = isPro;
+    db.users[idx].proExpiresAt = expiresAtStr;
+    writeLocalDb(db);
+  } else {
+    db.users.push({
+      email: cleanEmail,
+      name: cleanEmail.split("@")[0],
+      isPro: isPro,
+      proExpiresAt: expiresAtStr
+    });
+    writeLocalDb(db);
+  }
+
+  // 2. Sync to Supabase profile
+  if (supabaseClient) {
+    try {
+      const { error: updateErr } = await supabaseClient
+        .from("profiles")
+        .update({
+          is_pro: isPro,
+          pro_expires_at: expiresAtStr
+        })
+        .eq("email", cleanEmail);
+      
+      if (updateErr) {
+        console.warn(`[updateUserProStatus Supabase Sync Error] profiles update failed for ${cleanEmail}:`, updateErr.message);
+      } else {
+        console.log(`[updateUserProStatus Supabase Sync Success] profiles successfully updated for ${cleanEmail}.`);
+      }
+    } catch (supErr: any) {
+      console.warn(`[updateUserProStatus Supabase Sync Exception] updates skipped for ${cleanEmail}:`, supErr.message || supErr);
+    }
   }
 }
 
@@ -917,45 +978,16 @@ function start() {
 
       const cleanEmail = String(custom_field || "").toLowerCase().trim();
       if (cleanEmail) {
-        // 1. Update status in local fallback DB
-        const db = readLocalDb();
-        if (!db.users) db.users = [];
-        const idx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
-        if (idx !== -1) {
-          db.users[idx].isPro = true;
-          writeLocalDb(db);
-        } else {
-          db.users.push({
-            email: cleanEmail,
-            name: cleanEmail.split("@")[0],
-            isPro: true
-          });
-          writeLocalDb(db);
-        }
+        const expiresAt = new Date();
+        expiresAt.setMonth(expiresAt.getMonth() + 1); // 1 month subscription validity
+        
+        await updateUserProStatus(cleanEmail, true, expiresAt);
 
-        // 2. Sync to Supabase profile
-        if (supabaseClient) {
-          try {
-            const { error: updateErr } = await supabaseClient
-              .from("profiles")
-              .update({ is_pro: true })
-              .eq("email", cleanEmail);
-            
-            if (updateErr) {
-              console.warn("[PayTech IPN Supabase Sync Error] profiles update failed:", updateErr.message);
-            } else {
-              console.log("[PayTech IPN Supabase Sync Success] profiles successfully updated.");
-            }
-          } catch (supErr: any) {
-            console.warn("[PayTech IPN Supabase Sync Exception] updates skipped:", supErr.message || supErr);
-          }
-        }
-
-        // 3. Send system notification to user
+        // Send system notification to user
         await createNotification(
           cleanEmail,
           "Abonnement PRO Actif ! 👑",
-          "Félicitations, votre abonnement Brocante PRO a été activé avec succès via PayTech. Profitez dès maintenant de tous vos avantages !",
+          `Félicitations, votre abonnement Brocante PRO a été activé avec succès via PayTech. Valide jusqu'au ${expiresAt.toLocaleDateString('fr-FR')}.`,
           "system"
         );
       }
@@ -2936,38 +2968,14 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       const { isPro } = req.body;
       const cleanEmail = email.toLowerCase().trim();
 
-      if (useLocalDb) {
-        const db = readLocalDb();
-        if (!db.users) db.users = [];
-        const idx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
-        if (idx !== -1) {
-          db.users[idx].isPro = isPro === true;
-          writeLocalDb(db);
-        }
-      } else {
-        // We will update local preferences as well
-        const db = readLocalDb();
-        if (!db.users) db.users = [];
-        const idx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
-        if (idx !== -1) {
-          db.users[idx].isPro = isPro === true;
-          writeLocalDb(db);
-        }
-        
-        // Sync to Supabase profiles
-        if (supabaseClient) {
-          try {
-            await supabaseClient
-              .from("profiles")
-              .update({ is_pro: isPro === true })
-              .eq("email", cleanEmail);
-          } catch (supErr: any) {
-            console.warn("[Admin PRO update] Supabase profiles update failed:", supErr.message || supErr);
-          }
-        }
+      const expiresAt = isPro === true ? new Date() : null;
+      if (expiresAt) {
+        expiresAt.setMonth(expiresAt.getMonth() + 1); // 1 month default for admin PRO activation
       }
 
-      res.json({ success: true, isPro: isPro === true });
+      await updateUserProStatus(cleanEmail, isPro === true, expiresAt);
+
+      res.json({ success: true, isPro: isPro === true, proExpiresAt: expiresAt ? expiresAt.toISOString() : null });
     } catch (err: any) {
       console.error("Error admin updating pro status:", err);
       res.status(500).json({ error: "Erreur serveur." });
