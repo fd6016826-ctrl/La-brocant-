@@ -216,7 +216,7 @@ export const PremiumUpgradeModal: React.FC<PremiumUpgradeModalProps> = ({
                       <p className="text-[10px] text-amber-200/60 mt-1">Multipliez vos ventes par 10</p>
                     </div>
                     <div className="py-2 border-y border-dashed border-amber-900/30">
-                      <span className="font-serif font-black text-lg sm:text-xl text-white">4,99 €</span>
+                      <span className="font-serif font-black text-lg sm:text-xl text-white">4,99 € (soit 3 270 F CFA)</span>
                       <span className="text-[10px] text-stone-300"> / mois</span>
                     </div>
                     <ul className="space-y-2 text-[10.5px] text-stone-200">

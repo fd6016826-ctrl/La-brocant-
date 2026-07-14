@@ -13,7 +13,7 @@ dotenv.config();
 // PayTech Configuration (OM / Wave)
 const PAYTECH_API_KEY = process.env.PAYTECH_API_KEY || "a7f6253a29e79d2cbf83108b35946c85decac7eeb93872369ac22be47a509d4e";
 const PAYTECH_API_SECRET = process.env.PAYTECH_API_SECRET || "79b57d93b60b84ee7591ea3405acc08e6fdfa2dec785ca0c2cbab595489eb3e2";
-const PAYTECH_ENV = process.env.PAYTECH_ENV || "test";
+const PAYTECH_ENV = process.env.PAYTECH_ENV || "prod";
 const PAYTECH_IPN_URL = process.env.PAYTECH_IPN_URL || "https://la-brocant.vercel.app/api/payment/ipn";
 const PAYTECH_SUCCESS_URL = process.env.PAYTECH_SUCCESS_URL || "https://la-brocant.vercel.app/profile?payment=success";
 const PAYTECH_CANCEL_URL = process.env.PAYTECH_CANCEL_URL || "https://la-brocant.vercel.app/profile?payment=cancel";
