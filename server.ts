@@ -1214,7 +1214,7 @@ function start() {
       } = req.body;
 
       // Extract sellerEmail securely from authentication session
-      const sellerEmail = req.user.email;
+      const sellerEmail = (req as any).user ? (req as any).user.email : "";
 
       if (!sellerName) {
         res.status(400).json({ error: "Le nom du vendeur est requis." });
@@ -1372,7 +1372,7 @@ function start() {
       } = req.body;
 
       // Extract buyerEmail securely from auth session
-      const buyerEmail = req.user.email;
+      const buyerEmail = (req as any).user ? (req as any).user.email : "";
 
       if (!buyerName) {
         res.status(400).json({ error: "Le nom de l'acheteur est requis." });
@@ -1380,14 +1380,14 @@ function start() {
       }
 
       const id = `demand_${Date.now()}`;
-      let finalImageUrl = imageUrl || "https://images.unsplash.com/photo-1540962351504-03099e0a754b?auto=format&fit=crop&q=80&w=800"; // default fallback placeholder
+      let finalImageUrl = image_url || "https://images.unsplash.com/photo-1540962351504-03099e0a754b?auto=format&fit=crop&q=80&w=800"; // default fallback placeholder
 
       // Detect and handle base64 image data url
-      if (imageUrl && imageUrl.startsWith("data:image/")) {
-        const match = imageUrl.match(/^data:image\/(\w+);base64,/);
+      if (image_url && image_url.startsWith("data:image/")) {
+        const match = image_url.match(/^data:image\/(\w+);base64,/);
         if (match) {
           const fileExtension = match[1];
-          const base64Content = imageUrl.replace(/^data:image\/\w+;base64,/, "");
+          const base64Content = image_url.replace(/^data:image\/\w+;base64,/, "");
           const fileName = `demande_${id}.${fileExtension}`;
           const filePath = path.join(UPLOADS_DIR, fileName);
 
@@ -1396,7 +1396,7 @@ function start() {
             finalImageUrl = `/uploads/${fileName}`;
           } catch (err) {
             console.warn("[Vercel Upload Fallback] Impossible d'écrire l'image de la demande. Utilisation de la Data URL.");
-            finalImageUrl = imageUrl;
+            finalImageUrl = image_url;
           }
         }
       }
@@ -2776,7 +2776,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
   app.delete("/api/notifications/:id", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const cleanEmail = req.user.email;
+      const cleanEmail = (req as any).user ? (req as any).user.email : "";
       
       if (useLocalDb) {
         const db = readLocalDb();
