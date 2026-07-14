@@ -135,14 +135,46 @@ export default function App() {
   });
   const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false);
 
-  // Automatic sync of Pro status when account email changes
+  // Automatic sync of Pro status when account email changes (checking server state)
   useEffect(() => {
     if (!currentUserEmail) {
       setIsProUser(false);
       return;
     }
-    const isPro = localStorage.getItem(`brocante_pro_${currentUserEmail.toLowerCase()}`) === "true";
-    setIsProUser(isPro);
+    
+    let active = true;
+    
+    const checkProStatus = async () => {
+      try {
+        const response = await fetch(`/api/users/${encodeURIComponent(currentUserEmail.toLowerCase())}/pro-status`);
+        if (response.ok) {
+          const data = await response.json();
+          if (active && data && typeof data.isPro === "boolean") {
+            setIsProUser(data.isPro);
+            localStorage.setItem(`brocante_pro_${currentUserEmail.toLowerCase()}`, String(data.isPro));
+          }
+        } else {
+          // Fallback to local storage if API call fails
+          const isPro = localStorage.getItem(`brocante_pro_${currentUserEmail.toLowerCase()}`) === "true";
+          if (active) setIsProUser(isPro);
+        }
+      } catch (err) {
+        console.error("Failed to check user pro status from server:", err);
+        // Fallback to local storage
+        const isPro = localStorage.getItem(`brocante_pro_${currentUserEmail.toLowerCase()}`) === "true";
+        if (active) setIsProUser(isPro);
+      }
+    };
+
+    checkProStatus();
+    
+    // Periodically poll pro status every 15 seconds to sync after a redirect from PayTech callback
+    const interval = setInterval(checkProStatus, 15000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, [currentUserEmail]);
 
   // Active theme preference states (Light vs Dark mode)

@@ -257,9 +257,18 @@ async function checkIsProUser(email: string): Promise<boolean> {
       const user = (db.users || []).find((u: any) => u.email.toLowerCase().trim() === cleanEmail);
       return !!(user && user.isPro);
     } else {
-      const { data: profile } = await supabaseClient.from("profiles").select("email").eq("email", cleanEmail).maybeSingle();
-      // In this DB setup, any custom profile can also be marked as pro via email checking or pro attribute
-      // For fallback simplicity, look in local db too
+      // 1. Check in profiles on Supabase
+      const { data: profile, error } = await supabaseClient
+        .from("profiles")
+        .select("is_pro")
+        .eq("email", cleanEmail)
+        .maybeSingle();
+
+      if (!error && profile && typeof profile.is_pro === "boolean") {
+        return profile.is_pro;
+      }
+
+      // 2. Check local fallback
       const db = readLocalDb();
       const user = (db.users || []).find((u: any) => u.email.toLowerCase().trim() === cleanEmail);
       return !!(user && user.isPro);
@@ -841,10 +850,10 @@ function start() {
       const cleanEmail = email.toLowerCase().trim();
       const refCommand = `sub_${Date.now()}`;
 
-      // Config payload according to PayTech parameters
+      // Config payload according to PayTech parameters - Send item_price as NUMBER
       const payload = {
         item_name: "Abonnement Brocante PRO (Mensuel)",
-        item_price: "3270", // ~ 4.99 € (1 € = 655.95 XOF)
+        item_price: 3270, // Number, not string, so PayTech doesn't fall back to 100
         currency: "XOF",
         ref_command: refCommand,
         ipn_url: PAYTECH_IPN_URL,
@@ -857,6 +866,7 @@ function start() {
       const response = await fetch("https://paytech.sn/api/payment/request-payment", {
         method: "POST",
         headers: {
+          "Accept": "application/json",
           "Content-Type": "application/json",
           "API_KEY": PAYTECH_API_KEY,
           "API_SECRET": PAYTECH_API_SECRET
@@ -915,11 +925,20 @@ function start() {
         }
 
         // 2. Sync to Supabase profile
-        if (!useLocalDb && supabaseClient) {
+        if (supabaseClient) {
           try {
-            await supabaseClient.from("profiles").update({ is_pro: true }).eq("email", cleanEmail);
-          } catch (supErr) {
-            console.warn("[PayTech IPN Supabase Sync Warning] profiles updates skipped:", supErr);
+            const { error: updateErr } = await supabaseClient
+              .from("profiles")
+              .update({ is_pro: true })
+              .eq("email", cleanEmail);
+            
+            if (updateErr) {
+              console.warn("[PayTech IPN Supabase Sync Error] profiles update failed:", updateErr.message);
+            } else {
+              console.log("[PayTech IPN Supabase Sync Success] profiles successfully updated.");
+            }
+          } catch (supErr: any) {
+            console.warn("[PayTech IPN Supabase Sync Exception] updates skipped:", supErr.message || supErr);
           }
         }
 
@@ -936,6 +955,22 @@ function start() {
     } catch (err: any) {
       console.error("[PayTech IPN Processing Error]:", err.message || err);
       res.status(500).send("Internal server error");
+    }
+  });
+
+  // 3. Get PRO status of a user
+  app.get("/api/users/:email/pro-status", async (req, res) => {
+    try {
+      const { email } = req.params;
+      if (!email) {
+        res.status(400).json({ error: "Email requis." });
+        return;
+      }
+      const isPro = await checkIsProUser(email);
+      res.json({ isPro });
+    } catch (err: any) {
+      console.error("[Get Pro Status Error]:", err.message || err);
+      res.status(500).json({ error: "Erreur serveur lors de la récupération du statut PRO." });
     }
   });
 
@@ -2909,8 +2944,18 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
           db.users[idx].isPro = isPro === true;
           writeLocalDb(db);
         }
-        // Note: profiles table on Supabase may not have isPro, we can check or sync it.
-        // It's safer to sync it locally so it works.
+        
+        // Sync to Supabase profiles
+        if (supabaseClient) {
+          try {
+            await supabaseClient
+              .from("profiles")
+              .update({ is_pro: isPro === true })
+              .eq("email", cleanEmail);
+          } catch (supErr: any) {
+            console.warn("[Admin PRO update] Supabase profiles update failed:", supErr.message || supErr);
+          }
+        }
       }
 
       res.json({ success: true, isPro: isPro === true });
