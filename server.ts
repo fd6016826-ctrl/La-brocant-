@@ -850,15 +850,24 @@ function start() {
       const cleanEmail = email.toLowerCase().trim();
       const refCommand = `sub_${Date.now()}`;
 
+      // Dynamically resolve base URL from incoming request headers
+      const protocol = req.headers["x-forwarded-proto"] || "http";
+      const host = req.headers.host;
+      const baseUrl = `${protocol}://${host}`;
+
+      const dynamicIpnUrl = `${baseUrl}/api/payment/ipn`;
+      const dynamicSuccessUrl = `${baseUrl}/profile?payment=success`;
+      const dynamicCancelUrl = `${baseUrl}/profile?payment=cancel`;
+
       // Config payload according to PayTech parameters - Send item_price as NUMBER
       const payload = {
         item_name: "Abonnement Brocante PRO (Mensuel)",
         item_price: 3270, // Number, not string, so PayTech doesn't fall back to 100
         currency: "XOF",
         ref_command: refCommand,
-        ipn_url: PAYTECH_IPN_URL,
-        success_url: PAYTECH_SUCCESS_URL,
-        cancel_url: PAYTECH_CANCEL_URL,
+        ipn_url: dynamicIpnUrl,
+        success_url: dynamicSuccessUrl,
+        cancel_url: dynamicCancelUrl,
         custom_field: cleanEmail,
         env: PAYTECH_ENV
       };
