@@ -225,9 +225,7 @@ function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?:
       }
     ],
     users: [
-      { email: "fd6016826@gmail.com", name: "Fallou Diouf", avatar: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g1' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23fbbf24'/><stop offset='100%' stop-color='%23d97706'/></linearGradient></defs><rect width='100' height='100' rx='28' fill='url(%23g1)'/><g fill='none' stroke='%23ffffff' stroke-width='5.5' stroke-linecap='round' stroke-linejoin='round'><path d='M30 42h40v30c0 4-3 7-7 7H37c-4 0-7-3-7-7V42z'/><path d='M40 42c0-5 3-9 10-9s10 4 10 9'/><circle cx='50' cy='58' r='4' fill='%23ffffff'/></g></svg>", password: "Diouffallou@2004", isPro: true, pref_notif_announcements: true },
-      { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop", password: "123456", pref_notif_announcements: true },
-      { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop", password: "123456", pref_notif_announcements: true }
+      { email: "fd6016826@gmail.com", name: "Fallou Diouf", avatar: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g1' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23fbbf24'/><stop offset='100%' stop-color='%23d97706'/></linearGradient></defs><rect width='100' height='100' rx='28' fill='url(%23g1)'/><g fill='none' stroke='%23ffffff' stroke-width='5.5' stroke-linecap='round' stroke-linejoin='round'><path d='M30 42h40v30c0 4-3 7-7 7H37c-4 0-7-3-7-7V42z'/><path d='M40 42c0-5 3-9 10-9s10 4 10 9'/><circle cx='50' cy='58' r='4' fill='%23ffffff'/></g></svg>", password: "Diouffallou@2004", isPro: true, pref_notif_announcements: true }
     ]
   };
 
@@ -2583,7 +2581,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         pendingOtps.set(cleanEmail, { code: mockCode, expiresAt: Date.now() + 10 * 60 * 1000 });
         res.json({ success: true, isMocked: true, code: mockCode });
       } else {
-        // Try real e-mail OTP via Supabase Auth
+        // Real e-mail OTP via Supabase Auth — strictly send email, no mock injection
         const { error } = await supabaseClient.auth.signInWithOtp({
           email: cleanEmail,
           options: {
@@ -2592,13 +2590,11 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         });
 
         if (error) {
-          console.warn("Supabase Auth OTP error, falling back to mock:", error.message);
-          // Fallback to mock code if rate limited or similar
-          pendingOtps.set(cleanEmail, { code: mockCode, expiresAt: Date.now() + 10 * 60 * 1000 });
-          res.json({ success: true, isMocked: true, code: mockCode });
+          console.error("Supabase Auth OTP send error:", error.message);
+          res.status(400).json({ error: "Impossible d'envoyer l'e-mail de confirmation : " + error.message });
         } else {
           // Success: real email sent by Supabase
-          res.json({ success: true, isMocked: false });
+          res.json({ success: true, isMocked: false, message: "Un e-mail de confirmation avec votre code de vérification a été envoyé dans votre boîte de réception." });
         }
       }
     } catch (err) {

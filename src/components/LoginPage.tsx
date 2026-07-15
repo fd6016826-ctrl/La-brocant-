@@ -66,11 +66,8 @@ export interface LoginPageProps {
 export function LoginPage({
   onSuccess,
   onClose,
-  initialEmail = "jean.testeur@gmail.com",
-  defaultSimulatedEmails = [
-    "jean.testeur@gmail.com",
-    "sophie.b69@gmail.com"
-  ]
+  initialEmail = "",
+  defaultSimulatedEmails = []
 }: LoginPageProps) {
   const [activeView, setActiveView] = useState<"login" | "register" | "otp" | "forgot_password">("login");
   const [previousView, setPreviousView] = useState<"login" | "register" | "forgot_password">("login");
@@ -817,7 +814,7 @@ export function LoginPage({
                         Saisir le code OTP
                       </h2>
                       <p className="text-xs sm:text-[13px] text-stone-500 leading-relaxed">
-                        Saisissez le code de validation à 4 chiffres envoyé à <strong className="text-stone-800 break-all">{email || "alexander.johnston@gmail.com"}</strong>
+                        Saisissez le code de validation à 6 chiffres envoyé à <strong className="text-stone-800 break-all">{email}</strong>. Pensez à vérifier vos courriers indésirables (spams).
                       </p>
                     </div>
 
