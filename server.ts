@@ -2573,7 +2573,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       }
       
       const cleanEmail = email.trim().toLowerCase();
-      const mockCode = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
+      const mockCode = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digits matching UI design
 
       if (useLocalDb || !supabaseClient) {
         // Local DB mode always uses simulated OTP

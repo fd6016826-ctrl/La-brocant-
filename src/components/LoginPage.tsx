@@ -78,8 +78,8 @@ export function LoginPage({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [otpValues, setOtpValues] = useState<string[]>(["", "", "", "", "", ""]);
-  const [otpTimer, setOtpTimer] = useState<number>(59);
+  const [otpValues, setOtpValues] = useState<string[]>(["", "", "", ""]);
+  const [otpTimer, setOtpTimer] = useState<number>(29);
   const [generatedOtp, setGeneratedOtp] = useState<string>("");
   const [isMockOtp, setIsMockOtp] = useState<boolean>(false);
   const [showOtpNotification, setShowOtpNotification] = useState<boolean>(false);
@@ -141,25 +141,16 @@ export function LoginPage({
         return;
       }
 
-      setOtpValues(["", "", "", "", "", ""]);
-      setOtpTimer(59);
+      setOtpValues(["", "", "", ""]);
+      setOtpTimer(29);
       setPreviousView(origin);
 
       if (data.isMocked) {
         setIsMockOtp(true);
-        setGeneratedOtp(data.code);
-        setShowOtpNotification(true);
-        setTimeout(() => {
-          setShowOtpNotification(false);
-        }, 15000);
+        setGeneratedOtp(data.code || "");
       } else {
         setIsMockOtp(false);
         setGeneratedOtp("");
-        // Show email sent notification
-        setShowOtpNotification(true);
-        setTimeout(() => {
-          setShowOtpNotification(false);
-        }, 15000);
       }
 
       setActiveView("otp");
@@ -179,8 +170,8 @@ export function LoginPage({
     newOtp[index] = value;
     setOtpValues(newOtp);
 
-    // Auto focus next box
-    if (value && index < 5) {
+    // Auto focus next box for 4 digits layout
+    if (value && index < 3) {
       const nextInput = document.getElementById(`otp-input-${index + 1}`);
       nextInput?.focus();
     }
@@ -211,37 +202,21 @@ export function LoginPage({
         setErrorMsg("Veuillez saisir votre nom.");
         return;
       }
-      if (!acceptedTerms) {
-        setErrorMsg("Vous devez accepter les conditions d'utilisation.");
+      if (!password) {
+        setErrorMsg("Veuillez choisir un mot de passe.");
         return;
       }
-      setIsSubmitting(true);
-      try {
-        const response = await fetch("/api/auth/signup", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: email.trim(),
-            name: `${firstName.trim()} ${lastName.trim()}`,
-            avatar: selectedAvatar
-          })
-        });
-        const data = await response.json();
-        if (!response.ok || !data.success) {
-          setErrorMsg(data.error || "Une erreur est survenue lors de l'inscription.");
-          return;
-        }
-        // Show generated password to user
-        setTempPassword(data.password || "");
-        setShowTempPasswordAlert(true);
-        setSuccessMsg("Compte créé ! Utilisez le mot de passe ci-dessous pour vous connecter.");
-        setPassword("");
-        setActiveView("login");
-      } catch (err) {
-        setErrorMsg("Erreur réseau lors de l'inscription.");
-      } finally {
-        setIsSubmitting(false);
+      if (password.length < 6) {
+        setErrorMsg("Le mot de passe doit contenir au moins 6 caractères.");
+        return;
       }
+      if (password !== confirmPassword) {
+        setErrorMsg("Les mots de passe ne correspondent pas.");
+        return;
+      }
+
+      // Trigger OTP verification code send to user email
+      generateAndSendOtp(email.trim(), "register");
     } else if (activeView === "login") {
       if (!email.trim() || !email.includes("@")) {
         setErrorMsg("Veuillez saisir une adresse email valide.");
@@ -269,7 +244,7 @@ export function LoginPage({
           setErrorMsg(data.error || "Email ou mot de passe incorrect.");
           return;
         }
-        // Direct login — no OTP screen
+        // Direct login
         sessionStorage.setItem("brocante_session_token", data.token);
         onSuccess(
           data.user.email,
@@ -319,8 +294,8 @@ export function LoginPage({
     setIsVerifyingOtp(true);
 
     const enteredCode = otpValues.join("");
-    if (enteredCode.length < 6) {
-      setErrorMsg("Veuillez remplir les 6 chiffres du code de validation.");
+    if (enteredCode.length < 4) {
+      setErrorMsg("Veuillez remplir les 4 chiffres du code de validation.");
       setIsVerifyingOtp(false);
       return;
     }
@@ -339,33 +314,38 @@ export function LoginPage({
         return;
       }
 
-      // Success transition
-      setShowOtpNotification(false);
-
+      // Finalize signup in backend
       if (previousView === "register") {
+        const signupRes = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: email.trim(),
+            name: `${firstName.trim()} ${lastName.trim()}`,
+            avatar: selectedAvatar,
+            password
+          })
+        });
+        const signupData = await signupRes.json();
+        if (!signupRes.ok || !signupData.success) {
+          setErrorMsg(signupData.error || "Erreur lors de la création définitive du compte.");
+          setIsVerifyingOtp(false);
+          return;
+        }
         onSuccess(email.trim().toLowerCase(), `${firstName.trim()} ${lastName.trim()}`, selectedAvatar);
-      } else if (previousView === "login") {
+      } else {
         const inferredName = email.split("@")[0];
         const displayName = inferredName.charAt(0).toUpperCase() + inferredName.slice(1);
-
-        let autoAvatar = selectedAvatar;
-        if (email.includes("jean")) autoAvatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop";
-        else if (email.includes("marc")) autoAvatar = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop";
-        else if (email.includes("pierre")) autoAvatar = "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop";
-        else if (email.includes("sophie")) autoAvatar = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop";
-
-        onSuccess(email.trim().toLowerCase(), displayName, autoAvatar);
-      } else if (previousView === "forgot_password") {
-        setSuccessMsg("Votre mot de passe a été réinitialisé avec succès ! Vous pouvez maintenant vous connecter.");
-        setActiveView("login");
+        onSuccess(email.trim().toLowerCase(), displayName, DEFAULT_AVATAR_PLACEHOLDER);
       }
     } catch (err) {
-      console.error("Error verifying OTP:", err);
-      setErrorMsg("Erreur réseau lors de la vérification.");
+      setErrorMsg("Erreur de connexion lors de la vérification OTP.");
     } finally {
       setIsVerifyingOtp(false);
     }
   };
+
+
 
   const selectSimulated = (emailAddr: string) => {
     const rawName = emailAddr.split("@")[0];
@@ -668,110 +648,59 @@ export function LoginPage({
                         </div>
                       </div>
 
-                      {/* Photo / Portrait choice section */}
-                      <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200/80 space-y-2 mt-1 text-left">
-                        <div className="flex items-center gap-2.5">
-                          <img
-                            src={selectedAvatar}
-                            alt="Aperçu"
-                            className="w-9 h-9 rounded-full object-cover border-2 border-emerald-500 shadow-xs bg-stone-50"
-                            referrerPolicy="no-referrer"
+                      {/* Password & Confirm Password matching design */}
+                      <div className="space-y-1 text-left">
+                        <label className="block text-xs font-semibold text-stone-700">
+                          Mot de passe
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showPassword ? "text" : "password"}
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full text-xs border border-stone-250 rounded-lg pl-3.5 pr-10 py-3 bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-stone-900 shadow-3xs"
+                            required
                           />
-                          <div className="leading-tight">
-                            <span className="text-[10px] font-mono text-emerald-700 uppercase font-black tracking-wider block">Photo de profil active</span>
-                            <span className="text-[10.5px] font-bold text-stone-800">
-                              {selectedAvatar === DEFAULT_AVATAR_PLACEHOLDER
-                                ? "Avatar Anonyme"
-                                : "Visuel sélectionné"}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Interactive toggle tabs for Recommended vs Upload */}
-                        <div className="flex bg-stone-200/50 p-0.5 rounded-lg border border-stone-250/30">
                           <button
                             type="button"
-                            onClick={() => setAvatarTab("preset")}
-                            className={`flex-1 py-1 text-[9px] font-mono font-bold uppercase tracking-wider rounded-md transition-all cursor-pointer ${avatarTab === "preset" ? "bg-white text-stone-900 shadow-3xs" : "text-stone-500 hover:text-stone-700"
-                              }`}
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-3.5 top-3 text-stone-400 hover:text-stone-700"
                           >
-                            🌟 Choisir
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setAvatarTab("upload")}
-                            className={`flex-1 py-1 text-[9px] font-mono font-bold uppercase tracking-wider rounded-md transition-all cursor-pointer ${avatarTab === "upload" ? "bg-white text-stone-900 shadow-3xs" : "text-stone-500 hover:text-stone-700"
-                              }`}
-                          >
-                            📤 Importer
+                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
-
-                        {avatarTab === "preset" ? (
-                          <div className="grid grid-cols-6 gap-1 justify-items-center py-0.5">
-                            {PRESET_AVATARS.map((avatar) => {
-                              const isSelected = selectedAvatar === avatar.url;
-                              return (
-                                <button
-                                  key={avatar.id}
-                                  type="button"
-                                  onClick={() => setSelectedAvatar(avatar.url)}
-                                  className={`relative transition-all duration-150 cursor-pointer ${isSelected ? "scale-105" : "hover:scale-105 opacity-80"
-                                    }`}
-                                  title={avatar.name}
-                                >
-                                  <img
-                                    src={avatar.url}
-                                    alt={avatar.name}
-                                    className={`w-7 h-7 rounded-full object-cover ${isSelected ? "border-2 border-emerald-500 shadow-3xs" : "border border-stone-200"}`}
-                                  />
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div className="space-y-1.5 text-left pt-1">
-                            <div className="relative border border-dashed border-stone-300 rounded-lg p-2 hover:bg-stone-100 transition-colors text-center cursor-pointer relative">
-                              <input
-                                type="file"
-                                accept="image/*"
-                                onChange={handleFileUpload}
-                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                              />
-                              <p className="text-[9.5px] font-bold text-stone-600">Glisser ou cliquer pour importer</p>
-                            </div>
-                          </div>
-                        )}
                       </div>
 
-
-                      <div className="flex items-start gap-2 pt-0.5 text-left">
-                        <input
-                          type="checkbox"
-                          checked={acceptedTerms}
-                          onChange={(e) => setAcceptedTerms(e.target.checked)}
-                          className="mt-0.5 w-3.5 h-3.5 text-emerald-600 border-stone-300 focus:ring-emerald-500 rounded-sm cursor-pointer"
-                          id="check-terms"
-                        />
-                        <span className="text-[10px] text-stone-500 leading-normal">
-                          J'accepte les {" "}
+                      <div className="space-y-1 text-left">
+                        <label className="block text-xs font-semibold text-stone-700">
+                          Confirmer le mot de passe
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showConfirmPassword ? "text" : "password"}
+                            placeholder="Enter password"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            className="w-full text-xs border border-stone-250 rounded-lg pl-3.5 pr-10 py-3 bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-stone-900 shadow-3xs"
+                            required
+                          />
                           <button
                             type="button"
-                            onClick={() => setShowTermsModal(true)}
-                            className="text-emerald-600 font-bold underline hover:text-emerald-700 cursor-pointer"
+                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                            className="absolute right-3.5 top-3 text-stone-400 hover:text-stone-700"
                           >
-                            Conditions d'Utilisation
-                          </button>{" "}
-                          et d'éthique citoyenne.
-                        </span>
+                            {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
 
                       <button
                         type="submit"
-                        disabled={isSubmitting}
-                        className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer disabled:opacity-50"
+                        disabled={isLoadingOtp}
+                        className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3.5 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer mt-1 disabled:opacity-50"
                       >
-                        {isSubmitting ? "Inscription en cours..." : "Confirmer"}
+                        {isLoadingOtp ? "Envoi de l'OTP..." : "Confirmer"}
                       </button>
                     </form>
                   </motion.div>
@@ -788,10 +717,10 @@ export function LoginPage({
                   >
                     <div className="space-y-1.5 text-left">
                       <h2 className="text-2xl sm:text-3xl font-bold text-stone-900 tracking-tight">
-                        Saisir le code OTP
+                        Enter OTP
                       </h2>
                       <p className="text-xs sm:text-[13px] text-stone-500 leading-relaxed">
-                        Saisissez le code de validation à 6 chiffres envoyé à <strong className="text-stone-800 break-all">{email}</strong>. Pensez à vérifier vos courriers indésirables (spams).
+                        Enter the 4-digit OTP code that we sent to <strong className="text-stone-800 break-all">{email || "Alexander.johnston@gmail.com"}</strong>
                       </p>
                     </div>
 
@@ -803,8 +732,8 @@ export function LoginPage({
 
                     <form onSubmit={handleVerifyOtp} className="space-y-6">
 
-                      {/* OTP Inputs Layout strictly matching Image 3 (Updated to 6 digits) */}
-                      <div className="flex justify-center gap-1.5 sm:gap-2.5 py-2">
+                      {/* 4 Large OTP Input boxes with Brocante green border on focus matching design */}
+                      <div className="flex justify-center gap-3 py-2">
                         {otpValues.map((digit, index) => (
                           <input
                             key={index}
@@ -816,13 +745,13 @@ export function LoginPage({
                             value={digit}
                             onChange={(e) => handleOtpChange(index, e.target.value)}
                             onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                            className="w-10 h-12 sm:w-12 sm:h-14 text-center text-lg sm:text-xl font-bold border border-stone-250 rounded-xl bg-stone-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-stone-900 shadow-3xs"
+                            className="w-12 h-14 sm:w-14 sm:h-16 text-center text-xl sm:text-2xl font-bold border border-stone-250 rounded-xl bg-white focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-stone-900 shadow-3xs"
                             required
                           />
                         ))}
                       </div>
 
-                      {/* Cool SVG real circular progress timer built just for this */}
+                      {/* Circular timer & countdown */}
                       <div className="flex flex-col items-center justify-center space-y-1">
                         <div className="relative w-12 h-12 flex items-center justify-center">
                           <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
@@ -839,11 +768,11 @@ export function LoginPage({
                               cy="18"
                               r="16"
                               fill="none"
-                              className="stroke-emerald-500"
+                              className="stroke-[#42a85f]"
                               strokeWidth="2.5"
                               strokeDasharray="100 100"
                               initial={{ strokeDashoffset: 100 }}
-                              animate={{ strokeDashoffset: 100 - (otpTimer / 59) * 100 }}
+                              animate={{ strokeDashoffset: 100 - (otpTimer / 29) * 100 }}
                               transition={{ duration: 0.4 }}
                             />
                           </svg>
