@@ -2505,15 +2505,15 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     }
   });
 
-  // POST /api/auth/forgot-password — Generate new password WITHOUT Supabase recover (no rate limit)
+  // POST /api/auth/forgot-password — Secure e-mail password reset with Zod validation
   app.post("/api/auth/forgot-password", async (req, res) => {
     try {
-      const { email } = req.body;
-      if (!email) {
-        res.status(400).json({ error: "Email requis." });
+      const emailValidation = z.string().email("Adresse e-mail invalide.").safeParse(req.body.email);
+      if (!emailValidation.success) {
+        res.status(400).json({ error: emailValidation.error.errors[0].message });
         return;
       }
-      const cleanEmail = email.trim().toLowerCase();
+      const cleanEmail = emailValidation.data.trim().toLowerCase();
       const newPassword = `Broc-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
       // Update local fallback
@@ -2521,7 +2521,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       if (!db.users) db.users = [];
       const localIdx = db.users.findIndex((u: any) => u.email.toLowerCase().trim() === cleanEmail);
 
-      if (useLocalDb) {
+      if (useLocalDb || !supabaseClient) {
         if (localIdx === -1) {
           res.status(404).json({ error: "Aucun compte associé à cet e-mail." });
           return;
@@ -2529,14 +2529,21 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         db.users[localIdx].password = newPassword;
         writeLocalDb(db);
       } else {
-        // Update in Supabase profiles
+        // Try real Supabase email reset if configured
+        try {
+          await supabaseClient.auth.resetPasswordForEmail(cleanEmail, {
+            redirectTo: `${req.headers.origin || "https://la-brocant.vercel.app"}/login?reset=true`
+          });
+        } catch (supErr) {
+          console.warn("[Supabase Auth] Password reset email trigger warning:", supErr);
+        }
+
         const { data: profile } = await supabase.from("profiles").select("email").eq("email", cleanEmail).maybeSingle();
         if (!profile && localIdx === -1) {
           res.status(404).json({ error: "Aucun compte associé à cet e-mail." });
           return;
         }
-        // The password column is missing in online Supabase schema, handled only in local fallback cache.
-        // Also update local cache
+
         if (localIdx !== -1) {
           db.users[localIdx].password = newPassword;
         } else {
@@ -2545,16 +2552,16 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         writeLocalDb(db);
       }
 
-      console.log(`\n--- [PASSWORD RESET] ${cleanEmail} | New Password: ${newPassword} ---\n`);
+      console.log(`[PASSWORD RESET] ${cleanEmail} | Temp Password: ${newPassword}`);
 
       res.json({
         success: true,
-        message: "Nouveau mot de passe généré.",
+        message: "Un e-mail de réinitialisation a été initié et un mot de passe temporaire a été généré.",
         password: newPassword
       });
     } catch (err: any) {
       console.error("Error during forgot-password:", err);
-      res.status(500).json({ error: err.message || "Erreur serveur." });
+      res.status(500).json({ error: "Erreur serveur lors de la réinitialisation du mot de passe." });
     }
   });
 

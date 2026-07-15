@@ -944,10 +944,10 @@ export function LoginPage({
 
                       <button
                         type="submit"
-                        disabled={isLoadingOtp}
+                        disabled={isSubmitting}
                         className="w-full bg-[#42a85f] hover:bg-[#37944e] active:scale-98 text-white font-bold text-[13px] py-3.5 rounded-lg transition-all tracking-wide shadow-md hover:shadow-lg cursor-pointer mt-1 disabled:opacity-50"
                       >
-                        {isLoadingOtp ? "Envoi du code..." : "Confirmer"}
+                        {isSubmitting ? "Réinitialisation en cours..." : "Réinitialiser le mot de passe"}
                       </button>
                     </form>
                   </motion.div>
