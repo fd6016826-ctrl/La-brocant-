@@ -298,10 +298,10 @@ export function LoginPage({
           setErrorMsg(data.error || "Impossible de réinitialiser le mot de passe.");
           return;
         }
-        setTempPassword(data.password || "");
-        setShowTempPasswordAlert(true);
+        setTempPassword("");
+        setShowTempPasswordAlert(false);
         setPassword("");
-        setSuccessMsg("Nouveau mot de passe généré. Utilisez-le pour vous connecter.");
+        setSuccessMsg(data.message || "Un e-mail de réinitialisation a été envoyé à votre adresse e-mail. Veuillez consulter votre boîte de réception.");
         setActiveView("login");
       } catch (err) {
         setErrorMsg("Erreur réseau lors de la réinitialisation.");
@@ -481,30 +481,7 @@ export function LoginPage({
                       </div>
                     )}
 
-                    {showTempPasswordAlert && tempPassword && (
-                      <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-left relative">
-                        <button
-                          type="button"
-                          onClick={() => setShowTempPasswordAlert(false)}
-                          className="absolute top-2 right-2 text-amber-500 hover:text-amber-700 text-xs font-black cursor-pointer"
-                        >✕</button>
-                        <p className="text-[10px] font-mono font-black text-amber-700 uppercase tracking-wider mb-1">🔑 Votre mot de passe temporaire</p>
-                        <p className="text-[10.5px] text-amber-800 mb-2 leading-snug">
-                          Votre compte a été créé. Utilisez ce mot de passe pour vous connecter.
-                        </p>
-                        <div className="flex items-center gap-2 bg-white border border-amber-200 rounded-lg px-3 py-2">
-                          <span className="font-mono font-black text-stone-900 text-sm tracking-wider flex-1 select-all">{tempPassword}</span>
-                          <button
-                            type="button"
-                            onClick={() => { navigator.clipboard.writeText(tempPassword); }}
-                            className="text-[9px] font-bold text-amber-700 hover:text-amber-900 uppercase tracking-wider border border-amber-300 rounded px-2 py-1 hover:bg-amber-100 cursor-pointer transition-colors"
-                          >
-                            Copier
-                          </button>
-                        </div>
-                        <p className="text-[9.5px] text-amber-600 mt-1.5">⚠️ Notez ce mot de passe, il ne sera plus visible après fermeture.</p>
-                      </div>
-                    )}
+
 
                     {errorMsg && (
                       <div className="bg-red-50 text-red-700 text-[11px] font-mono p-2.5 rounded-xl border border-red-200">

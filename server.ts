@@ -2554,8 +2554,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
 
       res.json({
         success: true,
-        message: "Un e-mail de réinitialisation a été initié et un mot de passe temporaire a été généré.",
-        password: newPassword
+        message: "Un e-mail de réinitialisation a été envoyé à votre adresse e-mail. Veuillez consulter votre boîte de réception pour suivre les instructions."
       });
     } catch (err: any) {
       console.error("Error during forgot-password:", err);
@@ -2579,7 +2578,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       if (useLocalDb || !supabaseClient) {
         // Local DB mode always uses simulated OTP
         pendingOtps.set(cleanEmail, { code: mockCode, expiresAt: Date.now() + 10 * 60 * 1000 });
-        res.json({ success: true, isMocked: true, code: mockCode });
+        res.json({ success: true, isMocked: true, message: "Code OTP envoyé." });
       } else {
         // Real e-mail OTP via Supabase Auth — strictly send email, no mock injection
         const { error } = await supabaseClient.auth.signInWithOtp({
