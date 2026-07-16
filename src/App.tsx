@@ -600,7 +600,7 @@ export default function App() {
   // Fetch simulated accounts from the database
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await fetch("/api/users");
+      const res = await fetch(`/api/users?email=${encodeURIComponent(currentUserEmail)}`);
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -610,7 +610,7 @@ export default function App() {
     } catch (err) {
       console.error("Erreur chargement utilisateurs de test :", err);
     }
-  }, []);
+  }, [currentUserEmail]);
 
   // Fetch initial users list on mount
   useEffect(() => {
@@ -2941,52 +2941,60 @@ export default function App() {
                               )}
 
                               <div className="space-y-1 max-h-40 overflow-y-auto pr-0.5 scrollbar-thin">
-                                {simulatedAccounts.map((acc) => {
-                                  const isActive = currentUserEmail.toLowerCase() === acc.email.toLowerCase();
-                                  return (
-                                    <button
-                                      key={acc.email}
-                                      type="button"
-                                      onClick={() => {
-                                        setCurrentUserEmail(acc.email);
-                                        setCurrentUserName(acc.name);
-                                        setCurrentUserAvatar(acc.avatar);
-                                        try {
-                                          localStorage.setItem("brocante_current_user_email", acc.email);
-                                          localStorage.setItem("brocante_current_user_name", acc.name);
-                                          localStorage.setItem("brocante_current_user_avatar", acc.avatar);
-                                        } catch (err) {
-                                          console.warn(err);
-                                        }
-                                      }}
-                                      className={`w-full p-2 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
-                                        isActive
-                                          ? "bg-amber-500/5 dark:bg-amber-500/10 border-amber-400 dark:border-amber-500"
-                                          : "bg-white dark:bg-stone-900 border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-850"
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <img
-                                          src={getAvatarPhoto(acc.avatar)}
-                                          alt={acc.name}
-                                          className="w-6 h-6 rounded-lg object-cover border dark:border-stone-850 shrink-0"
-                                          referrerPolicy="no-referrer"
-                                        />
-                                        <div className="truncate leading-none">
-                                          <span className={`block text-[11px] font-bold truncate ${isActive ? "text-amber-700 dark:text-amber-400 font-black" : "text-stone-800 dark:text-stone-200"}`}>
-                                            {acc.name}
-                                          </span>
-                                          <span className="text-[8px] text-stone-400 font-mono block truncate mt-0.5">
-                                            {acc.email}
-                                          </span>
+                                {simulatedAccounts
+                                  .filter((acc) => {
+                                    const cleanEmail = currentUserEmail.toLowerCase().trim();
+                                    if (cleanEmail === "fd6016826@gmail.com") {
+                                      return true;
+                                    }
+                                    return acc.email.toLowerCase().trim() === cleanEmail;
+                                  })
+                                  .map((acc) => {
+                                    const isActive = currentUserEmail.toLowerCase() === acc.email.toLowerCase();
+                                    return (
+                                      <button
+                                        key={acc.email}
+                                        type="button"
+                                        onClick={() => {
+                                          setCurrentUserEmail(acc.email);
+                                          setCurrentUserName(acc.name);
+                                          setCurrentUserAvatar(acc.avatar);
+                                          try {
+                                            localStorage.setItem("brocante_current_user_email", acc.email);
+                                            localStorage.setItem("brocante_current_user_name", acc.name);
+                                            localStorage.setItem("brocante_current_user_avatar", acc.avatar);
+                                          } catch (err) {
+                                            console.warn(err);
+                                          }
+                                        }}
+                                        className={`w-full p-2 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                                          isActive
+                                            ? "bg-amber-500/5 dark:bg-amber-500/10 border-amber-400 dark:border-amber-500"
+                                            : "bg-white dark:bg-stone-900 border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-850"
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <img
+                                            src={getAvatarPhoto(acc.avatar)}
+                                            alt={acc.name}
+                                            className="w-6 h-6 rounded-lg object-cover border dark:border-stone-850 shrink-0"
+                                            referrerPolicy="no-referrer"
+                                          />
+                                          <div className="truncate leading-none">
+                                            <span className={`block text-[11px] font-bold truncate ${isActive ? "text-amber-700 dark:text-amber-400 font-black" : "text-stone-800 dark:text-stone-200"}`}>
+                                              {acc.name}
+                                            </span>
+                                            <span className="text-[8px] text-stone-400 font-mono block truncate mt-0.5">
+                                              {acc.email}
+                                            </span>
+                                          </div>
                                         </div>
-                                      </div>
-                                      {isActive && (
-                                        <Check className="w-3.5 h-3.5 text-amber-500 stroke-[3px] shrink-0" />
-                                      )}
-                                    </button>
-                                  );
-                                })}
+                                        {isActive && (
+                                          <Check className="w-3.5 h-3.5 text-amber-500 stroke-[3px] shrink-0" />
+                                        )}
+                                      </button>
+                                    );
+                                  })}
                               </div>
                             </div>
 

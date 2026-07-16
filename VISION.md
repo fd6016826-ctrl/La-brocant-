@@ -163,4 +163,17 @@ Pour valider et profiter de ces changements, voici ce que vous devez faire :
 * **Mode Réel par Défaut** : La configuration de production réelle (`PAYTECH_ENV=prod`) s'active désormais par défaut si aucune variable d'environnement n'est configurée sur Vercel, afin de simplifier le déploiement.
 * **Résolution de l'avertissement de fichier d'écriture** : Suppression de l'appel à `fs.mkdirSync` pour le dossier `uploads` obsolète au démarrage du serveur. Cela évite d'encombrer les logs Vercel d'avertissements liés au système de fichiers en lecture seule.
 
+---
+
+## 7. Spécifications & Critères de Validation d'Architecture
+
+Voici les décisions prises concernant l'architecture de stockage et d'authentification :
+
+* **2.6 [x] N/A — Pas de Supabase Storage actif** : 
+  Le traitement d'images est entièrement déporté et sécurisé en backend (Express). Au lieu d'utiliser un stockage cloud externe comme Supabase Storage, les fichiers (images et vidéos d'annonces ou d'avatars) sont téléversés sous forme de données Base64 intégrées aux requêtes JSON HTTP. Le serveur backend les traite, valide leurs types MIME, contrôle leur taille (limite stricte à 5 Mo) et les enregistre localement sur le disque dans le dossier `uploads` (ou conserve la Data URL Base64 de secours si le serveur s'exécute sur un environnement en lecture seule tel que Vercel).
+  
+* **3.4 [x] N/A — Authentification par identifiants/e-mail et OTP** :
+  L'authentification utilise un flux classique et robuste d'e-mail/mot de passe (avec validation de 6 caractères minimum côté Zod) combiné à un envoi de code OTP à 6 chiffres par e-mail (via Supabase Auth en mode en ligne, ou simulé en mémoire en mode local déconnecté). L'accès direct sans saisie OTP est interdit pour garantir la sécurité. La connexion via fournisseurs tiers (Social login, Google, Facebook, etc.) n'est pas activée et est classée comme extension Non Applicable (N/A) pour le périmètre actuel.
+
+
 

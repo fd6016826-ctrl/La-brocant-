@@ -1742,8 +1742,16 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
 
                   {/* ACCOUNT SWITCH GRID */}
                   <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3.5 ${showAddForm ? "md:col-span-2" : "md:col-span-3"}`}>
-                    {simulatedAccounts.map((acc) => {
-                      const isActive = currentUserEmail.toLowerCase() === acc.email.toLowerCase();
+                    {simulatedAccounts
+                      .filter((acc) => {
+                        const cleanEmail = currentUserEmail.toLowerCase().trim();
+                        if (cleanEmail === "fd6016826@gmail.com") {
+                          return true;
+                        }
+                        return acc.email.toLowerCase().trim() === cleanEmail;
+                      })
+                      .map((acc) => {
+                        const isActive = currentUserEmail.toLowerCase() === acc.email.toLowerCase();
                       return (
                         <button
                           key={acc.email}

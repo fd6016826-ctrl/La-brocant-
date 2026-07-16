@@ -2244,22 +2244,42 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     }
   });
 
-  // GET /api/users - Fetch users from database
+  // GET /api/users - Fetch users from database (restricted according to requester role)
   app.get("/api/users", async (req, res) => {
     try {
+      const { email } = req.query;
+      const cleanEmail = email ? String(email).toLowerCase().trim() : "";
+      const isAdmin = cleanEmail === ADMIN_EMAIL;
+
+      let allUsers: any[] = [];
+
       if (useLocalDb) {
         const db = readLocalDb();
-        res.json(db.users || []);
+        allUsers = db.users || [];
       } else {
         const { data, error } = await supabase.from("profiles").select("*");
         if (error || !data || data.length === 0) {
-          res.json([
+          allUsers = [
             { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop" },
             { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop" }
-          ]);
+          ];
         } else {
-          res.json(data.map((u: any) => ({ email: u.email, name: u.name, avatar: u.avatar_url || u.avatar })));
+          allUsers = data.map((u: any) => ({ email: u.email, name: u.name, avatar: u.avatar_url || u.avatar }));
         }
+      }
+
+      if (cleanEmail) {
+        if (isAdmin) {
+          // Admin sees all accounts, including the test accounts
+          res.json(allUsers);
+        } else {
+          // Regular users only see their own account
+          const filtered = allUsers.filter((u: any) => u.email.toLowerCase().trim() === cleanEmail);
+          res.json(filtered);
+        }
+      } else {
+        // Safe default if no email is supplied (e.g. initial launch before session setup)
+        res.json(allUsers);
       }
     } catch (err) {
       console.error("Error fetching users from DB:", err);
@@ -2508,7 +2528,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     try {
       const emailValidation = z.string().email("Adresse e-mail invalide.").safeParse(req.body.email);
       if (!emailValidation.success) {
-        res.status(400).json({ error: emailValidation.error.errors[0].message });
+        res.status(400).json({ error: emailValidation.error.issues[0].message });
         return;
       }
       const cleanEmail = emailValidation.data.trim().toLowerCase();
