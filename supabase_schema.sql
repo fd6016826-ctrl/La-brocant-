@@ -63,7 +63,9 @@ DROP POLICY IF EXISTS "Allow public read access to listings" ON public.listings;
 CREATE POLICY "Allow public read access to listings" ON public.listings FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Allow authenticated insert access to listings" ON public.listings;
-CREATE POLICY "Allow authenticated insert access to listings" ON public.listings FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Allow authenticated insert access to listings" ON public.listings FOR INSERT WITH CHECK (
+    auth.role() = 'authenticated' AND seller_email = auth.jwt()->>'email'
+);
 
 DROP POLICY IF EXISTS "Allow owners and buyers update access to listings" ON public.listings;
 CREATE POLICY "Allow owners and buyers update access to listings" ON public.listings FOR UPDATE USING (
@@ -98,7 +100,9 @@ DROP POLICY IF EXISTS "Allow public read access to demands" ON public.demands;
 CREATE POLICY "Allow public read access to demands" ON public.demands FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Allow authenticated insert access to demands" ON public.demands;
-CREATE POLICY "Allow authenticated insert access to demands" ON public.demands FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Allow authenticated insert access to demands" ON public.demands FOR INSERT WITH CHECK (
+    auth.role() = 'authenticated' AND buyer_email = auth.jwt()->>'email'
+);
 
 DROP POLICY IF EXISTS "Allow owners update access to demands" ON public.demands;
 CREATE POLICY "Allow owners update access to demands" ON public.demands FOR UPDATE USING (buyer_email = auth.jwt()->>'email') WITH CHECK (buyer_email = auth.jwt()->>'email');
@@ -132,7 +136,9 @@ CREATE POLICY "Allow members read access to chats" ON public.chats FOR SELECT US
 );
 
 DROP POLICY IF EXISTS "Allow authenticated insert access to chats" ON public.chats;
-CREATE POLICY "Allow authenticated insert access to chats" ON public.chats FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Allow authenticated insert access to chats" ON public.chats FOR INSERT WITH CHECK (
+    auth.role() = 'authenticated' AND (buyer_email = auth.jwt()->>'email' OR seller_email = auth.jwt()->>'email')
+);
 
 DROP POLICY IF EXISTS "Allow members update access to chats" ON public.chats;
 CREATE POLICY "Allow members update access to chats" ON public.chats FOR UPDATE USING (
@@ -165,7 +171,9 @@ DROP POLICY IF EXISTS "Allow user read access to notifications" ON public.notifi
 CREATE POLICY "Allow user read access to notifications" ON public.notifications FOR SELECT USING (user_email = auth.jwt()->>'email');
 
 DROP POLICY IF EXISTS "Allow system insert access to notifications" ON public.notifications;
-CREATE POLICY "Allow system insert access to notifications" ON public.notifications FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Allow system insert access to notifications" ON public.notifications FOR INSERT WITH CHECK (
+    auth.role() = 'authenticated' AND user_email = auth.jwt()->>'email'
+);
 
 DROP POLICY IF EXISTS "Allow user update access to notifications" ON public.notifications;
 CREATE POLICY "Allow user update access to notifications" ON public.notifications FOR UPDATE USING (user_email = auth.jwt()->>'email') WITH CHECK (user_email = auth.jwt()->>'email');

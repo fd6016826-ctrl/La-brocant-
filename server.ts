@@ -11,6 +11,27 @@ import { z } from "zod";
 
 dotenv.config();
 
+// Password hashing helper functions
+function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, "sha512").toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, storedHash: string): boolean {
+  if (!storedHash) return false;
+  if (!storedHash.includes(":")) {
+    return password === storedHash;
+  }
+  const [salt, hash] = storedHash.split(":");
+  const testHash = crypto.pbkdf2Sync(password, salt, 10000, 64, "sha512").toString("hex");
+  try {
+    return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(testHash, "hex"));
+  } catch (e) {
+    return false;
+  }
+}
+
 // PayTech Configuration (OM / Wave) - Loaded strictly from Vercel/Local env variables
 const PAYTECH_API_KEY = process.env.PAYTECH_API_KEY || "";
 const PAYTECH_API_SECRET = process.env.PAYTECH_API_SECRET || "";
@@ -23,13 +44,13 @@ if (!PAYTECH_API_KEY || !PAYTECH_API_SECRET) {
   console.warn("[SECURITY WARNING] PayTech API credentials are not set! Payment flows will fail.");
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // ZOD VALIDATION SCHEMAS
-// ─────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const listingSchema = z.object({
   title: z.string().min(1, "Le titre est requis."),
   description: z.string().optional(),
-  price: z.preprocess((val) => Number(val), z.number().nonnegative("Le prix doit être positif.")),
+  price: z.preprocess((val) => Number(val), z.number().nonnegative("Le prix doit Ãªtre positif.")),
   category: z.string().optional(),
   location: z.string().optional(),
   condition: z.string().optional(),
@@ -63,7 +84,7 @@ const chatSchema = z.object({
 
 const authSchema = z.object({
   email: z.string().email("Format d'e-mail invalide."),
-  password: z.string().min(6, "Le mot de passe doit contenir au moins 6 caractères.")
+  password: z.string().min(6, "Le mot de passe doit contenir au moins 6 caractÃ¨res.")
 });
 
 const localFilename = typeof __filename !== "undefined"
@@ -85,7 +106,7 @@ if (supabaseUrl && supabaseKey) {
     console.warn("[Brocante] Erreur lors de l'instanciation du client Supabase:", err);
   }
 } else {
-  console.error("[CRITICAL WARNING] SUPABASE_URL ou SUPABASE_SECRET_KEY est absent de vos variables d'environnement Vercel ! Le serveur bascule en mode local. Sur Vercel (disque en lecture seule), cela va empêcher l'authentification et l'écriture de données. Veuillez configurer vos variables Supabase dans la console Vercel.");
+  console.error("[CRITICAL WARNING] SUPABASE_URL ou SUPABASE_SECRET_KEY est absent de vos variables d'environnement Vercel ! Le serveur bascule en mode local. Sur Vercel (disque en lecture seule), cela va empÃªcher l'authentification et l'Ã©criture de donnÃ©es. Veuillez configurer vos variables Supabase dans la console Vercel.");
 }
 
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "fd6016826@gmail.com").trim().toLowerCase();
@@ -114,11 +135,11 @@ function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?:
       {
         id: "1",
         title: "Enfilade scandinave en teck vintage",
-        description: "Superbe enfilade scandinave des années 60 en teck. 3 portes coulissantes et 3 tiroirs. Très bel état général.",
+        description: "Superbe enfilade scandinave des annÃ©es 60 en teck. 3 portes coulissantes et 3 tiroirs. TrÃ¨s bel Ã©tat gÃ©nÃ©ral.",
         price: 480,
-        category: "Maison & Déco",
+        category: "Maison & DÃ©co",
         location: "Lyon",
-        condition: "Très bon état",
+        condition: "TrÃ¨s bon Ã©tat",
         image_url: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?w=800&auto=format&fit=crop&q=80",
         video_url: "",
         size: "180x45x75 cm",
@@ -135,9 +156,9 @@ function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?:
       {
         id: "2",
         title: "Appareil photo reflex Canon EOS 80D",
-        description: "Vendu avec objectif EFS 18-135mm, sacoche de transport, batterie et chargeur. Parfait pour débuter en photographie.",
+        description: "Vendu avec objectif EFS 18-135mm, sacoche de transport, batterie et chargeur. Parfait pour dÃ©buter en photographie.",
         price: 550,
-        category: "Électronique",
+        category: "Ã‰lectronique",
         location: "Paris",
         condition: "Comme neuf",
         image_url: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&auto=format&fit=crop&q=80",
@@ -156,11 +177,11 @@ function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?:
       {
         id: "3",
         title: "Collection de Vinyles Rock Classique (x10)",
-        description: "Lot de 10 vinyles rock (Pink Floyd, Led Zeppelin, The Rolling Stones...). Pochettes en bon état, disques sans rayures majeures.",
+        description: "Lot de 10 vinyles rock (Pink Floyd, Led Zeppelin, The Rolling Stones...). Pochettes en bon Ã©tat, disques sans rayures majeures.",
         price: 120,
         category: "Livres & Culture",
         location: "Bordeaux",
-        condition: "Bon état",
+        condition: "Bon Ã©tat",
         image_url: "https://images.unsplash.com/photo-1539635278303-d4002c07eae3?w=800&auto=format&fit=crop&q=80",
         video_url: "",
         size: "12 pouces",
@@ -178,13 +199,13 @@ function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?:
     demands: [
       {
         id: "demand_1",
-        title: "Recherche Canapé Togo Ligne Roset",
-        description: "Je recherche activement un canapé Togo de chez Ligne Roset, de préférence en velours ou cuir, couleur chaud (orange, marron ou beige). Budget flexible selon l'état.",
+        title: "Recherche CanapÃ© Togo Ligne Roset",
+        description: "Je recherche activement un canapÃ© Togo de chez Ligne Roset, de prÃ©fÃ©rence en velours ou cuir, couleur chaud (orange, marron ou beige). Budget flexible selon l'Ã©tat.",
         desired_price: 1500,
         quantity: 1,
         size: "3 places ou angle",
         color: "Chaud",
-        other_specs: "Authentique avec étiquette",
+        other_specs: "Authentique avec Ã©tiquette",
         image_url: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800&auto=format&fit=crop&q=80",
         buyer_email: "pierre.m@gmail.com",
         buyer_name: "Pierre M.",
@@ -201,13 +222,13 @@ function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?:
         seller_email: "marc.dupuis@outlook.fr",
         seller_name: "Marc Dupuis",
         buyer_email: "antigravity@la-brocante.fr",
-        buyer_name: "Agent Antigravity 🤖",
+        buyer_name: "Agent Antigravity ðŸ¤–",
         last_message_at: new Date(Date.now() - 3600000 * 2).toISOString(),
         messages: [
           {
             id: "msg_1",
             senderEmail: "antigravity@la-brocante.fr",
-            senderName: "Agent Antigravity 🤖",
+            senderName: "Agent Antigravity ðŸ¤–",
             text: "Bonjour Marc ! Votre enfilade scandinave en teck est vraiment magnifique. Est-elle toujours disponible ?",
             createdAt: new Date(Date.now() - 3600000 * 2 - 60000).toISOString(),
             isRead: true
@@ -877,7 +898,7 @@ app.use(cors({
     if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.endsWith(".vercel.app")) {
       callback(null, true);
     } else {
-      callback(new Error("Accès interdit par la politique CORS."));
+      callback(new Error("AccÃ¨s interdit par la politique CORS."));
     }
   },
   credentials: true,
@@ -889,7 +910,7 @@ let supabaseChecked = false;
 async function checkSupabaseConnection() {
   if (supabaseChecked) return;
   if (!supabaseClient) {
-    console.warn("[Brocante] Client Supabase non initialisé (variables d'environnement manquantes). Fallback local actif.");
+    console.warn("[Brocante] Client Supabase non initialisÃ© (variables d'environnement manquantes). Fallback local actif.");
     useLocalDb = true;
     supabaseChecked = true;
     return;
@@ -897,10 +918,10 @@ async function checkSupabaseConnection() {
   try {
     const { error } = await supabaseClient.from("profiles").select("email").limit(1);
     if (error) {
-      console.warn("[Brocante] Échec de la connexion Supabase (profiles absent). Fallback local actif.");
+      console.warn("[Brocante] Ã‰chec de la connexion Supabase (profiles absent). Fallback local actif.");
       useLocalDb = true;
     } else {
-      console.log("[Brocante] Connexion à Supabase réussie ! Base de données en ligne active.");
+      console.log("[Brocante] Connexion Ã  Supabase rÃ©ussie ! Base de donnÃ©es en ligne active.");
       useLocalDb = false;
     }
   } catch (err: any) {
@@ -960,7 +981,7 @@ const requireAuth = async (req: any, res: any, next: any) => {
           next();
           return;
         }
-        res.status(401).json({ error: "Jeton de session expiré ou invalide." });
+        res.status(401).json({ error: "Jeton de session expirÃ© ou invalide." });
         return;
       }
       req.user = { email: user.email };
@@ -971,13 +992,13 @@ const requireAuth = async (req: any, res: any, next: any) => {
   }
 };
 
-// Start function — synchronous so routes are registered immediately at module load
+// Start function â€” synchronous so routes are registered immediately at module load
 // (critical for Vercel serverless: no async timing issue)
 function start() {
 
   // --- API DEFINITIONS ---
 
-  // 0. Vercel Cron Job — Daily Maintenance at 10:00 UTC (Secured with CRON_SECRET)
+  // 0. Vercel Cron Job â€” Daily Maintenance at 10:00 UTC (Secured with CRON_SECRET)
   app.get("/api/cron", async (req, res) => {
     try {
       const authHeader = req.headers.authorization || req.headers["authorization"];
@@ -990,10 +1011,10 @@ function start() {
       }
 
       console.log("[Vercel Cron] Daily maintenance executed successfully at 10:00 UTC.");
-      res.json({ ok: true, message: "Tâche cron exécutée avec succès." });
+      res.json({ ok: true, message: "TÃ¢che cron exÃ©cutÃ©e avec succÃ¨s." });
     } catch (err: any) {
       console.error("[Vercel Cron Error]:", err);
-      res.status(500).json({ error: "Erreur lors de l'exécution de la tâche cron." });
+      res.status(500).json({ error: "Erreur lors de l'exÃ©cution de la tÃ¢che cron." });
     }
   });
 
@@ -1089,8 +1110,8 @@ function start() {
         // Send system notification to user
         await createNotification(
           cleanEmail,
-          "Abonnement PRO Actif ! 👑",
-          `Félicitations, votre abonnement Brocante PRO a été activé avec succès via PayTech. Valide jusqu'au ${expiresAt.toLocaleDateString('fr-FR')}.`,
+          "Abonnement PRO Actif ! ðŸ‘‘",
+          `FÃ©licitations, votre abonnement Brocante PRO a Ã©tÃ© activÃ© avec succÃ¨s via PayTech. Valide jusqu'au ${expiresAt.toLocaleDateString('fr-FR')}.`,
           "system"
         );
       }
@@ -1114,7 +1135,7 @@ function start() {
       res.json({ isPro });
     } catch (err: any) {
       console.error("[Get Pro Status Error]:", err.message || err);
-      res.status(500).json({ error: "Erreur serveur lors de la récupération du statut PRO." });
+      res.status(500).json({ error: "Erreur serveur lors de la rÃ©cupÃ©ration du statut PRO." });
     }
   });
 
@@ -1239,7 +1260,7 @@ function start() {
             fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
             finalImageUrl = `/uploads/${fileName}`;
           } catch (err) {
-            console.warn("[Vercel Upload Fallback] Impossible d'écrire l'image principale. Utilisation de la Data URL base64.");
+            console.warn("[Vercel Upload Fallback] Impossible d'Ã©crire l'image principale. Utilisation de la Data URL base64.");
             finalImageUrl = imageUrl;
           }
         }
@@ -1261,7 +1282,7 @@ function start() {
             fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
             finalVideoUrl = `/uploads/${fileName}`;
           } catch (err) {
-            console.warn("[Vercel Upload Fallback] Impossible d'écrire la vidéo. Utilisation de la Data URL base64.");
+            console.warn("[Vercel Upload Fallback] Impossible d'Ã©crire la vidÃ©o. Utilisation de la Data URL base64.");
             finalVideoUrl = videoUrl;
           }
         }
@@ -1284,7 +1305,7 @@ function start() {
                 fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
                 return `/uploads/${fileName}`;
               } catch (err) {
-                console.warn("[Vercel Upload Fallback] Impossible d'écrire l'image additionnelle " + idx + ". Utilisation de la Data URL.");
+                console.warn("[Vercel Upload Fallback] Impossible d'Ã©crire l'image additionnelle " + idx + ". Utilisation de la Data URL.");
                 return imgUrl;
               }
             }
@@ -1300,7 +1321,7 @@ function start() {
         price: Number(price),
         category,
         location: location || "France",
-        condition: condition || "Bon état",
+        condition: condition || "Bon Ã©tat",
         imageUrl: finalImageUrl,
         videoUrl: finalVideoUrl,
         size: size || "",
@@ -1309,7 +1330,7 @@ function start() {
         additionalImages: finalAdditionalImages,
         sellerName,
         sellerEmail: sellerEmail.toLowerCase().trim(),
-        sellerPhone: sellerPhone || "Non renseigné",
+        sellerPhone: sellerPhone || "Non renseignÃ©",
         createdAt: new Date().toISOString(),
         isSold: false,
         isSponsored: isSponsored === true || isSponsored === "true"
@@ -1322,7 +1343,7 @@ function start() {
       res.status(201).json(mapListingFromDb(data));
     } catch (err: any) {
       console.error("Error creating listing in Supabase:", err);
-      res.status(500).json({ error: "Erreur lors de la création de l'annonce." });
+      res.status(500).json({ error: "Erreur lors de la crÃ©ation de l'annonce." });
     }
   });
 
@@ -1396,7 +1417,7 @@ function start() {
             fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
             finalImageUrl = `/uploads/${fileName}`;
           } catch (err) {
-            console.warn("[Vercel Upload Fallback] Impossible d'écrire l'image de la demande. Utilisation de la Data URL.");
+            console.warn("[Vercel Upload Fallback] Impossible d'Ã©crire l'image de la demande. Utilisation de la Data URL.");
             finalImageUrl = image_url;
           }
         }
@@ -1410,7 +1431,7 @@ function start() {
         quantity: quantity ? Number(quantity) : 1,
         size: size || "N/A",
         color: color || "N/A",
-        otherSpecs: other_specs || "Aucune spécification supplémentaire.",
+        otherSpecs: other_specs || "Aucune spÃ©cification supplÃ©mentaire.",
         imageUrl: finalImageUrl,
         buyerEmail: buyerEmail.toLowerCase().trim(),
         buyerName,
@@ -1424,7 +1445,7 @@ function start() {
       // Notify other users who opted in for announcements
       const bEmailClean = buyerEmail.toLowerCase().trim();
       const notifTitle = "Nouvel avis de recherche !";
-      const notifMessage = `${buyerName} recherche activement : "${title}". Peut-être avez-vous cet objet chez vous ?`;
+      const notifMessage = `${buyerName} recherche activement : "${title}". Peut-Ãªtre avez-vous cet objet chez vous ?`;
 
       (async () => {
         try {
@@ -1456,7 +1477,7 @@ function start() {
       res.status(201).json(mapDemandFromDb(data));
     } catch (err) {
       console.error("Error creating buyer demand in Supabase:", err);
-      res.status(500).json({ error: "Erreur lors du dépôt de la demande d'achat." });
+      res.status(500).json({ error: "Erreur lors du dÃ©pÃ´t de la demande d'achat." });
     }
   });
 
@@ -1550,8 +1571,8 @@ function start() {
           if (insertErr) throw insertErr;
 
           // Notifications
-          await createNotification(listing.sellerEmail, "Objet vendu !", `Votre objet "${listing.title}" a été acheté par ${bName}.`, "transaction");
-          await createNotification(bEmail, "Achat finalisé !", `Votre achat pour "${listing.title}" a été validé avec succès.`, "transaction");
+          await createNotification(listing.sellerEmail, "Objet vendu !", `Votre objet "${listing.title}" a Ã©tÃ© achetÃ© par ${bName}.`, "transaction");
+          await createNotification(bEmail, "Achat finalisÃ© !", `Votre achat pour "${listing.title}" a Ã©tÃ© validÃ© avec succÃ¨s.`, "transaction");
 
           res.json(mapListingFromDb(insertedDb));
           return;
@@ -1583,8 +1604,8 @@ function start() {
           if (insertErr) throw insertErr;
 
           // Notifications
-          await createNotification(listing.sellerEmail, "Objet vendu !", `Votre objet "${listing.title}" a été acheté par ${bName}. Stock épuisé.`, "transaction");
-          await createNotification(bEmail, "Achat finalisé !", `Votre achat pour "${listing.title}" a été validé avec succès.`, "transaction");
+          await createNotification(listing.sellerEmail, "Objet vendu !", `Votre objet "${listing.title}" a Ã©tÃ© achetÃ© par ${bName}. Stock Ã©puisÃ©.`, "transaction");
+          await createNotification(bEmail, "Achat finalisÃ© !", `Votre achat pour "${listing.title}" a Ã©tÃ© validÃ© avec succÃ¨s.`, "transaction");
 
           res.json(mapListingFromDb(insertedDb));
           return;
@@ -1599,8 +1620,8 @@ function start() {
         if (updateErr) throw updateErr;
 
         // Notifications for pending purchase confirmation
-        await createNotification(listing.sellerEmail, "Offre d'achat reçue !", `${bName} souhaite acheter "${listing.title}". Confirmez la transaction pour finaliser.`, "transaction");
-        await createNotification(bEmail, "Demande d'achat enregistrée !", `Votre demande d'achat pour "${listing.title}" a bien été enregistrée. En attente de confirmation du vendeur.`, "transaction");
+        await createNotification(listing.sellerEmail, "Offre d'achat reÃ§ue !", `${bName} souhaite acheter "${listing.title}". Confirmez la transaction pour finaliser.`, "transaction");
+        await createNotification(bEmail, "Demande d'achat enregistrÃ©e !", `Votre demande d'achat pour "${listing.title}" a bien Ã©tÃ© enregistrÃ©e. En attente de confirmation du vendeur.`, "transaction");
 
         res.json(mapListingFromDb(updatedDb));
       }
@@ -1656,8 +1677,8 @@ function start() {
           if (insertErr) throw insertErr;
 
           // Notifications
-          await createNotification(listing.sellerEmail, "Vente validée !", `Votre vente pour "${listing.title}" à ${bName} a été enregistrée.`, "transaction");
-          await createNotification(bEmail, "Achat validé !", `Le vendeur de "${listing.title}" a confirmé votre achat en mains propres.`, "transaction");
+          await createNotification(listing.sellerEmail, "Vente validÃ©e !", `Votre vente pour "${listing.title}" Ã  ${bName} a Ã©tÃ© enregistrÃ©e.`, "transaction");
+          await createNotification(bEmail, "Achat validÃ© !", `Le vendeur de "${listing.title}" a confirmÃ© votre achat en mains propres.`, "transaction");
 
           res.json(mapListingFromDb(insertedDb));
           return;
@@ -1689,8 +1710,8 @@ function start() {
           if (insertErr) throw insertErr;
 
           // Notifications
-          await createNotification(listing.sellerEmail, "Vente validée !", `Votre vente pour "${listing.title}" à ${bName} a été enregistrée. Stock épuisé.`, "transaction");
-          await createNotification(bEmail, "Achat validé !", `Le vendeur de "${listing.title}" a confirmé votre achat en mains propres.`, "transaction");
+          await createNotification(listing.sellerEmail, "Vente validÃ©e !", `Votre vente pour "${listing.title}" Ã  ${bName} a Ã©tÃ© enregistrÃ©e. Stock Ã©puisÃ©.`, "transaction");
+          await createNotification(bEmail, "Achat validÃ© !", `Le vendeur de "${listing.title}" a confirmÃ© votre achat en mains propres.`, "transaction");
 
           res.json(mapListingFromDb(insertedDb));
           return;
@@ -1702,7 +1723,7 @@ function start() {
         if (updateErr) throw updateErr;
 
         // Vendeur confirme la vente en premier
-        await createNotification(listing.sellerEmail, "Vente pré-confirmée !", `Vous avez validé la vente de "${listing.title}". En attente de confirmation de l'acheteur.`, "transaction");
+        await createNotification(listing.sellerEmail, "Vente prÃ©-confirmÃ©e !", `Vous avez validÃ© la vente de "${listing.title}". En attente de confirmation de l'acheteur.`, "transaction");
 
         res.json(mapListingFromDb(updatedDb));
       }
@@ -1725,7 +1746,7 @@ function start() {
         return;
       }
 
-      res.json({ success: true, message: "Annonce supprimée avec succès." });
+      res.json({ success: true, message: "Annonce supprimÃ©e avec succÃ¨s." });
     } catch (err) {
       console.error("Error deleting listing in Supabase:", err);
       res.status(500).json({ error: "Impossible de supprimer l'annonce." });
@@ -1945,7 +1966,7 @@ function start() {
     };
 
     if (!process.env.GEMINI_API_KEY) {
-      return `🤖 *[Agent Antigravity en mode simulé]* Bonjour ! Pour activer mes vraies capacités d'agent de négociation autonome (Antigravity-preview), veuillez ajouter votre clé API dans les secrets d'AI Studio sous la variable **GEMINI_API_KEY**.\n\nEn attendant, voici une réponse simulée : "Votre article m'intéresse vivement pour un achat immédiat à ${safeListing.price} € !"`;
+      return `ðŸ¤– *[Agent Antigravity en mode simulÃ©]* Bonjour ! Pour activer mes vraies capacitÃ©s d'agent de nÃ©gociation autonome (Antigravity-preview), veuillez ajouter votre clÃ© API dans les secrets d'AI Studio sous la variable **GEMINI_API_KEY**.\n\nEn attendant, voici une rÃ©ponse simulÃ©e : "Votre article m'intÃ©resse vivement pour un achat immÃ©diat Ã  ${safeListing.price} â‚¬ !"`;
     }
 
     try {
@@ -1964,32 +1985,32 @@ function start() {
 
       // Set up the French negotiation context
       const systemInstruction = `
-Vous êtes "Agent Antigravity 🤖", un agent intelligent de négociation intégré dans une application française de brocante en ligne nommée "La Brocante".
-Votre but est de négocier avec un utilisateur humain de manière polie, vivante, réaliste et typiquement française (avec un ton chaleureux de brocanteur ou d'acheteur malin).
+Vous Ãªtes "Agent Antigravity ðŸ¤–", un agent intelligent de nÃ©gociation intÃ©grÃ© dans une application franÃ§aise de brocante en ligne nommÃ©e "La Brocante".
+Votre but est de nÃ©gocier avec un utilisateur humain de maniÃ¨re polie, vivante, rÃ©aliste et typiquement franÃ§aise (avec un ton chaleureux de brocanteur ou d'acheteur malin).
 
 Contexte de l'annonce :
 - Titre : ${safeListing.title}
-- Catégorie : ${safeListing.category}
-- Prix initial : ${safeListing.price} €
-- État de l'objet : ${safeListing.condition}
+- CatÃ©gorie : ${safeListing.category}
+- Prix initial : ${safeListing.price} â‚¬
+- Ã‰tat de l'objet : ${safeListing.condition}
 - Localisation : ${safeListing.location}
 - Description de l'objet : ${safeListing.description}
 
-Votre rôle actuel : vous êtes le **${agentRole}** de cet objet (situé à ${safeListing.location}).
+Votre rÃ´le actuel : vous Ãªtes le **${agentRole}** de cet objet (situÃ© Ã  ${safeListing.location}).
 L'utilisateur est le **${userRole}** (son nom de compte est ${userName}).
 
 Consignes de comportement :
-1. Saluez chaleureusement s'il s'agit du tout premier message de discussion. Des formules typiques comme "Salut !", "Fascinant objet !", "Bonjour, excellente affaire !" s'intègrent admirablement.
-2. Négociez d'une manière raisonnable et amusante. Si vous êtes acheteur, vous pouvez tenter de proposer un prix légèrement inférieur de 10-20% pour marchander, ou poser des questions sur l'état de l'objet. Si vous êtes vendeur, défendez la quality de votre objet mais restez ouvert à une petite baisse si l'acheteur négocie bien.
-3. Si la transaction ou un accord est obtenu, invitez l'utilisateur à cliquer sur le bouton de double-confirmation d'achat direct "Confirmer mon achat" ou "Valider la vente" proposé dans l'interface de conversation.
-4. Répondez de manière concise et directe en Français (maximum 3-4 courtes phrases) pour garder le tchat dynamique. N'insérez jamais de jargon technique d'IA ou de métadonnées de conteneur d'exécution Bash/Linux (par exemple, pas de mention d'Antigravity Agent, d'environnement de bac à salle ou d'API). Restez purement dans la peau du brocanteur ou acheteur.
+1. Saluez chaleureusement s'il s'agit du tout premier message de discussion. Des formules typiques comme "Salut !", "Fascinant objet !", "Bonjour, excellente affaire !" s'intÃ¨grent admirablement.
+2. NÃ©gociez d'une maniÃ¨re raisonnable et amusante. Si vous Ãªtes acheteur, vous pouvez tenter de proposer un prix lÃ©gÃ¨rement infÃ©rieur de 10-20% pour marchander, ou poser des questions sur l'Ã©tat de l'objet. Si vous Ãªtes vendeur, dÃ©fendez la quality de votre objet mais restez ouvert Ã  une petite baisse si l'acheteur nÃ©gocie bien.
+3. Si la transaction ou un accord est obtenu, invitez l'utilisateur Ã  cliquer sur le bouton de double-confirmation d'achat direct "Confirmer mon achat" ou "Valider la vente" proposÃ© dans l'interface de conversation.
+4. RÃ©pondez de maniÃ¨re concise et directe en FranÃ§ais (maximum 3-4 courtes phrases) pour garder le tchat dynamique. N'insÃ©rez jamais de jargon technique d'IA ou de mÃ©tadonnÃ©es de conteneur d'exÃ©cution Bash/Linux (par exemple, pas de mention d'Antigravity Agent, d'environnement de bac Ã  salle ou d'API). Restez purement dans la peau du brocanteur ou acheteur.
 
-Historique récent de la discussion :
+Historique rÃ©cent de la discussion :
 ${conversationHistory}
 
-Dernier message reçu de l'utilisateur : "${promptText}"
+Dernier message reÃ§u de l'utilisateur : "${promptText}"
 
-Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
+GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
 `;
 
       try {
@@ -2034,18 +2055,18 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
           console.error("Gemini fallback model also failed:", fallbackErr.message || fallbackErr);
           const isUserSeller = thread.sellerEmail.toLowerCase().trim() === "antigravity@la-brocante.fr";
           if (isUserSeller) {
-            return `🤖 *[Agent Antigravity]* Bonjour ! Des limites ou quotas temporaires sur l'API Gemini ne permettent pas d'obtenir une réponse de l'I.A. en direct pour le moment.\n\nEn tant que vendeur, je vous propose cet objet vintage exceptionnel au prix convenu de ${listing.price} € ! L'achat direct est entièrement ouvert.`;
+            return `ðŸ¤– *[Agent Antigravity]* Bonjour ! Des limites ou quotas temporaires sur l'API Gemini ne permettent pas d'obtenir une rÃ©ponse de l'I.A. en direct pour le moment.\n\nEn tant que vendeur, je vous propose cet objet vintage exceptionnel au prix convenu de ${listing.price} â‚¬ ! L'achat direct est entiÃ¨rement ouvert.`;
           } else {
-            return `🤖 *[Agent Antigravity]* Bonjour ! Des limites ou quotas temporaires sur l'API Gemini ne permettent pas d'obtenir une réponse de l'I.A. en direct pour le moment.\n\nEn tant qu'acheteur intéressé par "${listing.title}", je vous propose un accord amical. Validons l'achat direct !`;
+            return `ðŸ¤– *[Agent Antigravity]* Bonjour ! Des limites ou quotas temporaires sur l'API Gemini ne permettent pas d'obtenir une rÃ©ponse de l'I.A. en direct pour le moment.\n\nEn tant qu'acheteur intÃ©ressÃ© par "${listing.title}", je vous propose un accord amical. Validons l'achat direct !`;
           }
         }
       }
 
-      return "Je n'ai pas pu formuler de réponse à l'instant, mais je suis là pour négocier !";
+      return "Je n'ai pas pu formuler de rÃ©ponse Ã  l'instant, mais je suis lÃ  pour nÃ©gocier !";
 
     } catch (err: any) {
       console.error("Error calling Antigravity Agent:", err);
-      return `🤖 Désolé, j'ai rencontré un problème technique en contactant mon cerveau gyroscopique Antigravity : ${err.message || err}. Pouvez-vous répéter ?`;
+      return `ðŸ¤– DÃ©solÃ©, j'ai rencontrÃ© un problÃ¨me technique en contactant mon cerveau gyroscopique Antigravity : ${err.message || err}. Pouvez-vous rÃ©pÃ©ter ?`;
     }
   }
 
@@ -2055,7 +2076,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       const { listingId, text, senderEmail, senderName, recipientEmail, recipientName, buyerEmail, buyerName, lastImageUrl, requestedQuantity } = req.body;
 
       if (!listingId || !senderEmail || !senderName) {
-        res.status(400).json({ error: "Données de message incomplètes." });
+        res.status(400).json({ error: "DonnÃ©es de message incomplÃ¨tes." });
         return;
       }
 
@@ -2171,7 +2192,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
           const aiMsg = {
             id: `msg_${Date.now() + 10}`,
             senderEmail: "antigravity@la-brocante.fr",
-            senderName: isAntigravityBuyer ? "Chasseur Antigravity 🤖" : "Agent Antigravity 🤖",
+            senderName: isAntigravityBuyer ? "Chasseur Antigravity ðŸ¤–" : "Agent Antigravity ðŸ¤–",
             text: aiResponseText,
             createdAt: aiTimestamp,
             isRead: false
@@ -2322,24 +2343,26 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     }
   });
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // ————————————————————————————————————————————————————————————————————————————————
   // AUTH ENDPOINTS — Password-based, no Supabase OTP (no rate limit issues)
-  // ─────────────────────────────────────────────────────────────────────────
+  // ————————————————————————————————————————————————————————————————————————————————
 
-  // POST /api/auth/signup — Create account, generate password, save to DB
+  // POST /api/auth/signup — Create account, generate password if not provided, hash it, save to DB
   app.post("/api/auth/signup", async (req, res) => {
     try {
-      const { email, name, avatar } = req.body;
-      if (!email || !name) {
-        res.status(400).json({ error: "Email et nom requis." });
+      const { email, name, displayName, avatar, avatarUrl, password } = req.body;
+      const cleanEmail = (email || "").toLowerCase().trim();
+      const finalName = name || displayName || cleanEmail.split("@")[0];
+      const finalAvatar = avatar || avatarUrl || "";
+
+      if (!cleanEmail) {
+        res.status(400).json({ error: "Email requis." });
         return;
       }
-      const cleanEmail = email.trim().toLowerCase();
-      const displayName = name.trim();
-      const avatarUrl = avatar || "";
 
-      // Generate a random password
-      const generatedPassword = `Broc-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      // Si un mot de passe est fourni, on l'utilise, sinon on en génère un
+      const rawPassword = password || `Broc-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      const hashedPassword = hashPassword(rawPassword);
 
       if (useLocalDb) {
         const db = readLocalDb();
@@ -2351,9 +2374,9 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         }
         db.users.push({
           email: cleanEmail,
-          name: displayName,
-          avatar: avatarUrl,
-          password: generatedPassword,
+          name: finalName,
+          avatar: finalAvatar,
+          password: hashedPassword,
           isPro: cleanEmail.includes("pro") || cleanEmail.includes("sophie")
         });
         writeLocalDb(db);
@@ -2364,34 +2387,35 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
           res.status(400).json({ error: "Cet e-mail est déjà enregistré." });
           return;
         }
-        // Insert into profiles table (exclude password & preferences not present in online schema)
+        // Insert into profiles table including password
         const { error: insertErr } = await supabase.from("profiles").insert({
           email: cleanEmail,
-          name: displayName,
-          avatar_url: avatarUrl
+          name: finalName,
+          avatar_url: finalAvatar,
+          password: hashedPassword
         });
         if (insertErr) {
           console.warn("Supabase profiles insert error, falling back to local:", insertErr.message);
           const db = readLocalDb();
           if (!db.users) db.users = [];
-          db.users.push({ email: cleanEmail, name: displayName, avatar: avatarUrl, password: generatedPassword });
+          db.users.push({ email: cleanEmail, name: finalName, avatar: finalAvatar, password: hashedPassword });
           writeLocalDb(db);
         }
         // Also save to local fallback
         const db = readLocalDb();
         if (!db.users) db.users = [];
         if (!db.users.some((u: any) => u.email.toLowerCase().trim() === cleanEmail)) {
-          db.users.push({ email: cleanEmail, name: displayName, avatar: avatarUrl, password: generatedPassword });
+          db.users.push({ email: cleanEmail, name: finalName, avatar: finalAvatar, password: hashedPassword });
           writeLocalDb(db);
         }
       }
 
-      console.log(`\n--- [SIGNUP] ${cleanEmail} | Password: ${generatedPassword} ---\n`);
+      console.log(`\n--- [SIGNUP] ${cleanEmail} | Password: ${rawPassword} ---\n`);
 
       res.json({
         success: true,
         message: "Compte créé avec succès.",
-        password: generatedPassword
+        password: rawPassword
       });
     } catch (err: any) {
       console.error("Error during signup:", err);
@@ -2399,7 +2423,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     }
   });
 
-  // POST /api/auth/login — Direct email + password login against profiles table
+  // POST /api/auth/login â€” Direct email + password login against profiles table
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { email, password } = req.body;
@@ -2431,12 +2455,12 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
             email: ADMIN_EMAIL,
             name: "Fallou Diouf",
             avatar: adminUser.avatar,
-            password: ADMIN_PASSWORD,
+            password: hashPassword(ADMIN_PASSWORD),
             pref_notif_announcements: true
           });
           writeLocalDb(db);
         } else {
-          db.users[localIdx].password = ADMIN_PASSWORD; // update if mismatch
+          db.users[localIdx].password = hashPassword(ADMIN_PASSWORD); // update if mismatch
           writeLocalDb(db);
         }
 
@@ -2448,7 +2472,8 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
               await supabase.from("profiles").insert({
                 email: ADMIN_EMAIL,
                 name: "Fallou Diouf",
-                avatar_url: adminUser.avatar
+                avatar_url: adminUser.avatar,
+                password: hashPassword(ADMIN_PASSWORD)
               });
             }
           } catch (e) {
@@ -2460,7 +2485,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
 
         res.json({
           success: true,
-          message: "Connexion réussie.",
+          message: "Connexion rÃ©ussie.",
           token: sessionToken,
           user: adminUser
         });
@@ -2472,7 +2497,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       const localUser = (db.users || []).find((u: any) => u.email.toLowerCase().trim() === cleanEmail);
 
       if (localUser) {
-        if (localUser.password !== password) {
+        if (!verifyPassword(password, localUser.password)) {
           res.status(400).json({ error: "Email ou mot de passe incorrect." });
           return;
         }
@@ -2491,10 +2516,10 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
           .maybeSingle();
 
         if (profileErr || !profile) {
-          res.status(400).json({ error: "Aucun compte trouvé avec cet e-mail." });
+          res.status(400).json({ error: "Aucun compte trouvÃ© avec cet e-mail." });
           return;
         }
-        if (profile.password !== password) {
+        if (!verifyPassword(password, profile.password)) {
           res.status(400).json({ error: "Email ou mot de passe incorrect." });
           return;
         }
@@ -2505,7 +2530,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
           isPro: cleanEmail.includes("pro") || cleanEmail.includes("sophie")
         };
       } else {
-        res.status(400).json({ error: "Aucun compte trouvé avec cet e-mail." });
+        res.status(400).json({ error: "Aucun compte trouvÃ© avec cet e-mail." });
         return;
       }
 
@@ -2513,7 +2538,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
 
       res.json({
         success: true,
-        message: "Connexion réussie.",
+        message: "Connexion rÃ©ussie.",
         token: sessionToken,
         user: finalUser
       });
@@ -2523,7 +2548,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     }
   });
 
-  // POST /api/auth/forgot-password — Secure e-mail password reset with Zod validation
+  // POST /api/auth/forgot-password â€” Secure e-mail password reset with Zod validation
   app.post("/api/auth/forgot-password", async (req, res) => {
     try {
       const emailValidation = z.string().email("Adresse e-mail invalide.").safeParse(req.body.email);
@@ -2541,7 +2566,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
 
       if (useLocalDb || !supabaseClient) {
         if (localIdx === -1) {
-          res.status(404).json({ error: "Aucun compte associé à cet e-mail." });
+          res.status(404).json({ error: "Aucun compte associÃ© Ã  cet e-mail." });
           return;
         }
         db.users[localIdx].password = newPassword;
@@ -2558,7 +2583,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
 
         const { data: profile } = await supabase.from("profiles").select("email").eq("email", cleanEmail).maybeSingle();
         if (!profile && localIdx === -1) {
-          res.status(404).json({ error: "Aucun compte associé à cet e-mail." });
+          res.status(404).json({ error: "Aucun compte associÃ© Ã  cet e-mail." });
           return;
         }
 
@@ -2574,11 +2599,11 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
 
       res.json({
         success: true,
-        message: "Un e-mail de réinitialisation a été envoyé à votre adresse e-mail. Veuillez consulter votre boîte de réception pour suivre les instructions."
+        message: "Un e-mail de rÃ©initialisation a Ã©tÃ© envoyÃ© Ã  votre adresse e-mail. Veuillez consulter votre boÃ®te de rÃ©ception pour suivre les instructions."
       });
     } catch (err: any) {
       console.error("Error during forgot-password:", err);
-      res.status(500).json({ error: "Erreur serveur lors de la réinitialisation du mot de passe." });
+      res.status(500).json({ error: "Erreur serveur lors de la rÃ©initialisation du mot de passe." });
     }
   });
 
@@ -2598,9 +2623,9 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       if (useLocalDb || !supabaseClient) {
         // Local DB mode always uses simulated OTP
         pendingOtps.set(cleanEmail, { code: mockCode, expiresAt: Date.now() + 10 * 60 * 1000 });
-        res.json({ success: true, isMocked: true, message: "Code OTP envoyé." });
+        res.json({ success: true, isMocked: true, message: "Code OTP envoyÃ©." });
       } else {
-        // Real e-mail OTP via Supabase Auth — strictly send email, no mock injection
+        // Real e-mail OTP via Supabase Auth â€” strictly send email, no mock injection
         const { error } = await supabaseClient.auth.signInWithOtp({
           email: cleanEmail,
           options: {
@@ -2613,7 +2638,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
           res.status(400).json({ error: "Impossible d'envoyer l'e-mail de confirmation : " + error.message });
         } else {
           // Success: real email sent by Supabase
-          res.json({ success: true, isMocked: false, message: "Un e-mail de confirmation avec votre code de vérification a été envoyé dans votre boîte de réception." });
+          res.json({ success: true, isMocked: false, message: "Un e-mail de confirmation avec votre code de vÃ©rification a Ã©tÃ© envoyÃ© dans votre boÃ®te de rÃ©ception." });
         }
       }
     } catch (err) {
@@ -2638,7 +2663,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       const mockSession = pendingOtps.get(cleanEmail);
       if (mockSession && mockSession.code === cleanCode && mockSession.expiresAt > Date.now()) {
         pendingOtps.delete(cleanEmail);
-        res.json({ success: true, message: "Code vérifié avec succès (mode simulation)." });
+        res.json({ success: true, message: "Code vÃ©rifiÃ© avec succÃ¨s (mode simulation)." });
         return;
       }
 
@@ -2653,22 +2678,22 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         });
 
         if (error) {
-          res.status(400).json({ error: "Code de validation incorrect ou expiré." });
+          res.status(400).json({ error: "Code de validation incorrect ou expirÃ©." });
         } else {
-          res.json({ success: true, message: "Code vérifié avec succès." });
+          res.json({ success: true, message: "Code vÃ©rifiÃ© avec succÃ¨s." });
         }
       }
     } catch (err) {
       console.error("Error in /api/auth/verify-otp:", err);
-      res.status(500).json({ error: "Erreur serveur lors de la vérification." });
+      res.status(500).json({ error: "Erreur serveur lors de la vÃ©rification." });
     }
   });
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // NOTIFICATIONS & PREFERENCES ENDPOINTS
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  // GET /api/notifications — Retrieve user notifications with free tier rate limits
+  // GET /api/notifications â€” Retrieve user notifications with free tier rate limits
   app.get("/api/notifications", async (req, res) => {
     try {
       const { email } = req.query;
@@ -2728,7 +2753,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         id: n.id,
         title: n.title,
         message: n.message,
-        time: n.created_at ? new Date(n.created_at).toLocaleString("fr-FR") : "À l'instant",
+        time: n.created_at ? new Date(n.created_at).toLocaleString("fr-FR") : "Ã€ l'instant",
         type: n.type,
         read: n.read === true
       }));
@@ -2741,14 +2766,14 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         id: n.id,
         title: n.title,
         message: n.message,
-        time: n.created_at ? new Date(n.created_at).toLocaleString("fr-FR") : "À l'instant",
+        time: n.created_at ? new Date(n.created_at).toLocaleString("fr-FR") : "Ã€ l'instant",
         type: n.type,
         read: n.read === true
       })));
     }
   });
 
-  // PATCH /api/notifications/:id/read — Toggle/update read state of a notification
+  // PATCH /api/notifications/:id/read â€” Toggle/update read state of a notification
   app.patch("/api/notifications/:id/read", async (req, res) => {
     try {
       const { id } = req.params;
@@ -2797,7 +2822,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     }
   });
 
-  // DELETE /api/notifications/:id — Delete a single notification securely
+  // DELETE /api/notifications/:id â€” Delete a single notification securely
   app.delete("/api/notifications/:id", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
@@ -2810,9 +2835,9 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         db.notifications = db.notifications.filter((n: any) => n.id !== id || n.user_email.toLowerCase().trim() !== cleanEmail);
         if (db.notifications.length < originalLength) {
           writeLocalDb(db);
-          res.json({ success: true, message: "Notification supprimée." });
+          res.json({ success: true, message: "Notification supprimÃ©e." });
         } else {
-          res.status(404).json({ error: "Notification introuvable ou non autorisée." });
+          res.status(404).json({ error: "Notification introuvable ou non autorisÃ©e." });
         }
       } else {
         const { error } = await supabaseClient.from("notifications").delete().eq("id", id).eq("user_email", cleanEmail);
@@ -2827,7 +2852,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         if (db.notifications.length < originalLength) {
           writeLocalDb(db);
         }
-        res.json({ success: true, message: "Notification supprimée." });
+        res.json({ success: true, message: "Notification supprimÃ©e." });
       }
     } catch (err: any) {
       console.error("Error deleting notification:", err);
@@ -2835,7 +2860,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
     }
   });
 
-  // POST /api/notifications/clear-all — Delete all notifications for a user
+  // POST /api/notifications/clear-all â€” Delete all notifications for a user
   app.post("/api/notifications/clear-all", async (req, res) => {
     try {
       const { email } = req.body;
@@ -2859,14 +2884,14 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         db.notifications = (db.notifications || []).filter((n: any) => n.user_email.toLowerCase().trim() !== cleanEmail);
         writeLocalDb(db);
       }
-      res.json({ success: true, message: "Toutes les notifications ont été supprimées." });
+      res.json({ success: true, message: "Toutes les notifications ont Ã©tÃ© supprimÃ©es." });
     } catch (err: any) {
       console.error("Error clearing notifications:", err);
       res.status(500).json({ error: "Erreur serveur." });
     }
   });
 
-  // POST /api/notifications/mark-all-read — Mark all notifications as read for a user
+  // POST /api/notifications/mark-all-read â€” Mark all notifications as read for a user
   app.post("/api/notifications/mark-all-read", async (req, res) => {
     try {
       const { email } = req.body;
@@ -2900,14 +2925,14 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         });
         writeLocalDb(db);
       }
-      res.json({ success: true, message: "Toutes les notifications ont été marquées comme lues." });
+      res.json({ success: true, message: "Toutes les notifications ont Ã©tÃ© marquÃ©es comme lues." });
     } catch (err: any) {
       console.error("Error marking notifications as read:", err);
       res.status(500).json({ error: "Erreur serveur." });
     }
   });
 
-  // PATCH /api/users/preferences — Update user settings (pref_notif_announcements, etc.)
+  // PATCH /api/users/preferences â€” Update user settings (pref_notif_announcements, etc.)
   app.patch("/api/users/preferences", async (req, res) => {
     try {
       const { email, prefNotifAnnouncements } = req.body;
@@ -2941,26 +2966,26 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       res.json({ success: true, preferences: updates });
     } catch (err: any) {
       console.error("Error updating user preferences:", err);
-      res.status(500).json({ error: "Erreur serveur lors de la mise à jour des préférences." });
+      res.status(500).json({ error: "Erreur serveur lors de la mise Ã  jour des prÃ©fÃ©rences." });
     }
   });
 
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // ADMIN ENDPOINTS
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  // Middleware pour vérifier que la requête provient bien de l'administrateur
+  // Middleware pour vÃ©rifier que la requÃªte provient bien de l'administrateur
   const adminAuthMiddleware = (req: any, res: any, next: any) => {
     const requesterEmail = req.headers["x-admin-email"] || req.query.adminEmail || req.body.adminEmail;
     if (requesterEmail && requesterEmail.toLowerCase().trim() === ADMIN_EMAIL) {
       next();
     } else {
-      res.status(403).json({ error: "Accès refusé. Vous devez être administrateur." });
+      res.status(403).json({ error: "AccÃ¨s refusÃ©. Vous devez Ãªtre administrateur." });
     }
   };
 
-  // GET /api/admin/stats — Récupérer toutes les statistiques du site pour le Dashboard Admin
+  // GET /api/admin/stats â€” RÃ©cupÃ©rer toutes les statistiques du site pour le Dashboard Admin
   app.get("/api/admin/stats", adminAuthMiddleware, async (req, res) => {
     try {
       let users: any[] = [];
@@ -3007,11 +3032,11 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
       });
     } catch (err: any) {
       console.error("Error fetching admin stats:", err);
-      res.status(500).json({ error: "Erreur serveur lors de la récupération des statistiques." });
+      res.status(500).json({ error: "Erreur serveur lors de la rÃ©cupÃ©ration des statistiques." });
     }
   });
 
-  // POST /api/admin/broadcast-notification — Diffuser une notification à tous les utilisateurs
+  // POST /api/admin/broadcast-notification â€” Diffuser une notification Ã  tous les utilisateurs
   app.post("/api/admin/broadcast-notification", adminAuthMiddleware, async (req, res) => {
     try {
       const { title, message, type } = req.body;
@@ -3057,14 +3082,14 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         }
       }
 
-      res.json({ success: true, message: `Notification diffusée à ${userEmails.length} utilisateurs.` });
+      res.json({ success: true, message: `Notification diffusÃ©e Ã  ${userEmails.length} utilisateurs.` });
     } catch (err: any) {
       console.error("Error broadcasting notification:", err);
       res.status(500).json({ error: "Erreur serveur." });
     }
   });
 
-  // DELETE /api/admin/listings/:id — Modération/Suppression d'une annonce
+  // DELETE /api/admin/listings/:id â€” ModÃ©ration/Suppression d'une annonce
   app.delete("/api/admin/listings/:id", adminAuthMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
@@ -3078,14 +3103,14 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         if (error) throw error;
       }
 
-      res.json({ success: true, message: "Annonce supprimée par l'administrateur." });
+      res.json({ success: true, message: "Annonce supprimÃ©e par l'administrateur." });
     } catch (err: any) {
       console.error("Error admin deleting listing:", err);
       res.status(500).json({ error: "Erreur serveur." });
     }
   });
 
-  // DELETE /api/admin/users/:email — Suppression d'un utilisateur et de toutes ses données
+  // DELETE /api/admin/users/:email â€” Suppression d'un utilisateur et de toutes ses donnÃ©es
   app.delete("/api/admin/users/:email", adminAuthMiddleware, async (req, res) => {
     try {
       const { email } = req.params;
@@ -3108,14 +3133,14 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
         await supabase.from("profiles").delete().eq("email", cleanEmail);
       }
 
-      res.json({ success: true, message: "Compte utilisateur supprimé avec succès." });
+      res.json({ success: true, message: "Compte utilisateur supprimÃ© avec succÃ¨s." });
     } catch (err: any) {
       console.error("Error admin deleting user:", err);
       res.status(500).json({ error: "Erreur serveur." });
     }
   });
 
-  // PATCH /api/admin/users/:email/pro — Modifier le statut Pro/Premium d'un utilisateur
+  // PATCH /api/admin/users/:email/pro â€” Modifier le statut Pro/Premium d'un utilisateur
   app.patch("/api/admin/users/:email/pro", adminAuthMiddleware, async (req, res) => {
     try {
       const { email } = req.params;
@@ -3138,7 +3163,7 @@ Générez votre réponse directe en tant qu'Agent Antigravity 🤖 :
 
   // Global 404 handler for API routes
   app.use("/api/*", (req, res) => {
-    res.status(404).json({ error: "Route API non trouvée." });
+    res.status(404).json({ error: "Route API non trouvÃ©e." });
   });
 
   // Global error handling middleware for Express

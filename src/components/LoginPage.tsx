@@ -17,8 +17,7 @@ import {
   Sparkles,
   User,
   ArrowLeft,
-  RefreshCw,
-  Facebook
+  RefreshCw
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { DEFAULT_AVATAR_PLACEHOLDER } from "../App";
@@ -528,9 +527,25 @@ export function LoginPage({
                       >
                         {isSubmitting ? "Connexion en cours..." : "Continuer"}
                       </button>
+
+                      {/* Create account link — placed just below the main CTA */}
+                      <p className="text-center text-xs text-stone-500 pt-1">
+                        Vous n'avez pas de compte ?{" "}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setErrorMsg("");
+                            setSuccessMsg("");
+                            setActiveView("register");
+                          }}
+                          className="text-[#42a85f] hover:text-[#37944e] font-extrabold underline ml-0.5 cursor-pointer"
+                        >
+                          S'inscrire.
+                        </button>
+                      </p>
                     </form>
 
-                    {/* Simulated Social login block as requested */}
+                    {/* Social login — Google only */}
                     <div className="space-y-3.5">
                       <div className="relative flex py-1 items-center">
                         <div className="flex-grow border-t border-stone-200"></div>
@@ -538,44 +553,14 @@ export function LoginPage({
                         <div className="flex-grow border-t border-stone-200"></div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          type="button"
-                          onClick={() => selectSimulated("sophie.b69@gmail.com")}
-                          className="border border-stone-250 hover:bg-stone-50 rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition duration-200 cursor-pointer text-stone-750 font-medium text-xs shadow-3xs hover:border-stone-300"
-                        >
-                          <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4 shrink-0" />
-                          <span>Google</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => selectSimulated("marc.dupuis@outlook.fr")}
-                          className="border border-stone-250 hover:bg-stone-50 rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition duration-200 cursor-pointer text-stone-750 font-medium text-xs shadow-3xs hover:border-stone-300"
-                        >
-                          <Facebook className="w-4 h-4 text-[#1877F2] shrink-0 fill-[#1877F2]" />
-                          <span>Facebook</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Quick Simulated swappers */}
-                    <div className="pt-2 bg-stone-50 p-3 rounded-xl border border-stone-200/60 text-left">
-                      <span className="block text-[10px] font-mono text-emerald-800 uppercase tracking-wider font-bold mb-1.5">
-                        💡 ACCÈS DE TEST DIRECT :
-                      </span>
-                      <div className="grid grid-cols-2 gap-1.5 text-[10.5px]">
-                        {defaultSimulatedEmails.map((simEmail) => (
-                          <button
-                            key={simEmail}
-                            type="button"
-                            onClick={() => selectSimulated(simEmail)}
-                            className="bg-white hover:bg-emerald-50 hover:border-emerald-250 border border-stone-200 px-2 py-1.5 rounded-md text-left truncate font-mono text-stone-600 transition"
-                          >
-                            ⚡ {simEmail.split("@")[0]}
-                          </button>
-                        ))}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => selectSimulated("sophie.b69@gmail.com")}
+                        className="w-full border border-stone-250 hover:bg-stone-50 rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition duration-200 cursor-pointer text-stone-750 font-medium text-xs shadow-3xs hover:border-stone-300"
+                      >
+                        <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4 shrink-0" />
+                        <span>Google</span>
+                      </button>
                     </div>
                   </motion.div>
                 )}
@@ -859,25 +844,10 @@ export function LoginPage({
               </AnimatePresence>
             </div>
 
-            {/* Bottom switcher footer precisely matching bottom layout */}
+            {/* Bottom footer — only shows for non-login views + Charte éthique */}
             <div className="border-t border-stone-150 pt-4 flex items-center justify-between text-xs text-stone-500">
               <span>
-                {activeView === "login" ? (
-                  <>
-                    Vous n'avez pas de compte ?{" "}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setErrorMsg("");
-                        setSuccessMsg("");
-                        setActiveView("register");
-                      }}
-                      className="text-[#42a85f] hover:text-[#37944e] font-extrabold underline ml-0.5 cursor-pointer"
-                    >
-                      S'inscrire.
-                    </button>
-                  </>
-                ) : activeView === "register" ? (
+                {activeView === "register" ? (
                   <>
                     Vous avez déjà un compte ?{" "}
                     <button
@@ -892,7 +862,7 @@ export function LoginPage({
                       Se connecter.
                     </button>
                   </>
-                ) : (
+                ) : activeView !== "login" ? (
                   <>
                     Retour à la{" "}
                     <button
@@ -907,7 +877,7 @@ export function LoginPage({
                       Connexion.
                     </button>
                   </>
-                )}
+                ) : null}
               </span>
 
               <button
