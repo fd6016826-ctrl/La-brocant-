@@ -274,7 +274,7 @@ export function LandingPage({
               
               {/* Product/Scene Image inside */}
               <img 
-                src="https://images.unsplash.com/photo-1531058020387-3be344559be6?w=600" 
+                src="https://images.unsplash.com/photo-1484755560695-a4c7300c5c29?w=600" 
                 alt="Vide grenier brocante" 
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover opacity-85 mix-blend-multiply filter contrast-110"
