@@ -555,7 +555,7 @@ export function LoginPage({
 
                       <button
                         type="button"
-                        onClick={() => selectSimulated("sophie.b69@gmail.com")}
+                        onClick={() => setErrorMsg("La connexion Google n'est pas encore configurée. Veuillez utiliser votre email et mot de passe.")}
                         className="w-full border border-stone-250 hover:bg-stone-50 rounded-lg py-2.5 px-4 flex items-center justify-center gap-2 transition duration-200 cursor-pointer text-stone-750 font-medium text-xs shadow-3xs hover:border-stone-300"
                       >
                         <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4 shrink-0" />

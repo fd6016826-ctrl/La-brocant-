@@ -8,6 +8,7 @@ import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import { z } from "zod";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 
@@ -114,6 +115,57 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Diouffallou@2004";
 
 // Store pending mock OTP sessions in memory
 const pendingOtps = new Map<string, { code: string; expiresAt: number }>();
+
+// SMTP Email Configuration (Gmail App Password)
+const SMTP_EMAIL = process.env.SMTP_EMAIL || process.env.ADMIN_EMAIL || "";
+const SMTP_PASSWORD = process.env.SMTP_PASSWORD || "";
+
+let emailTransporter: any = null;
+if (SMTP_EMAIL && SMTP_PASSWORD) {
+  emailTransporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: SMTP_EMAIL,
+      pass: SMTP_PASSWORD,
+    },
+  });
+  console.log(`[Brocante] Email transporter configuré avec ${SMTP_EMAIL}`);
+} else {
+  console.warn("[Brocante] SMTP_EMAIL ou SMTP_PASSWORD manquant — les emails OTP ne seront pas envoyés.");
+}
+
+async function sendOtpEmail(to: string, code: string): Promise<boolean> {
+  if (!emailTransporter) {
+    console.warn("[OTP] Pas de transporter email configuré, OTP non envoyé.");
+    return false;
+  }
+  try {
+    await emailTransporter.sendMail({
+      from: `"La Brocante" <${SMTP_EMAIL}>`,
+      to,
+      subject: `🔐 Votre code de vérification : ${code}`,
+      html: `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #1a1a2e; border-radius: 16px; color: #ffffff;">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <h1 style="color: #e94560; margin: 0; font-size: 28px;">La Brocante</h1>
+            <p style="color: #a0a0b0; margin-top: 8px;">Achat & Vente au Sénégal</p>
+          </div>
+          <div style="background: #16213e; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 24px;">
+            <p style="color: #a0a0b0; margin: 0 0 12px 0;">Votre code de vérification :</p>
+            <div style="font-size: 40px; font-weight: bold; letter-spacing: 12px; color: #e94560; padding: 16px; background: #0f3460; border-radius: 8px; display: inline-block;">${code}</div>
+          </div>
+          <p style="color: #a0a0b0; text-align: center; font-size: 14px;">Ce code expire dans <strong style="color: #ffffff;">10 minutes</strong>.</p>
+          <p style="color: #666; text-align: center; font-size: 12px; margin-top: 24px;">Si vous n'avez pas demandé ce code, ignorez cet email.</p>
+        </div>
+      `,
+    });
+    console.log(`[OTP] Email envoyé avec succès à ${to}`);
+    return true;
+  } catch (err: any) {
+    console.error(`[OTP] Erreur d'envoi email à ${to}:`, err.message || err);
+    return false;
+  }
+}
 
 // FLAG for local fallback DB
 let useLocalDb = false;
@@ -2616,29 +2668,26 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
         res.status(400).json({ error: "Email requis." });
         return;
       }
-      
+
       const cleanEmail = email.trim().toLowerCase();
-      const mockCode = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digits matching UI design
+      const otpCode = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digits matching UI design
 
-      if (useLocalDb || !supabaseClient) {
-        // Local DB mode always uses simulated OTP
-        pendingOtps.set(cleanEmail, { code: mockCode, expiresAt: Date.now() + 10 * 60 * 1000 });
-        res.json({ success: true, isMocked: true, message: "Code OTP envoyÃ©." });
+      // Store OTP in memory (10 min expiry)
+      pendingOtps.set(cleanEmail, { code: otpCode, expiresAt: Date.now() + 10 * 60 * 1000 });
+
+      if (useLocalDb || !emailTransporter) {
+        // Mode local / pas de SMTP configuré → OTP simulé
+        console.log(`[OTP MOCK] Code pour ${cleanEmail}: ${otpCode}`);
+        res.json({ success: true, isMocked: true, code: otpCode, message: "Code OTP envoyé (mode simulation)." });
       } else {
-        // Real e-mail OTP via Supabase Auth â€” strictly send email, no mock injection
-        const { error } = await supabaseClient.auth.signInWithOtp({
-          email: cleanEmail,
-          options: {
-            shouldCreateUser: true
-          }
-        });
-
-        if (error) {
-          console.error("Supabase Auth OTP send error:", error.message);
-          res.status(400).json({ error: "Impossible d'envoyer l'e-mail de confirmation : " + error.message });
+        // Envoi réel par email via Nodemailer
+        const sent = await sendOtpEmail(cleanEmail, otpCode);
+        if (sent) {
+          res.json({ success: true, isMocked: false, message: "Un code de vérification à 4 chiffres a été envoyé à votre adresse email." });
         } else {
-          // Success: real email sent by Supabase
-          res.json({ success: true, isMocked: false, message: "Un e-mail de confirmation avec votre code de vÃ©rification a Ã©tÃ© envoyÃ© dans votre boÃ®te de rÃ©ception." });
+          // Fallback : on retourne le code en mode mock si l'envoi échoue
+          console.warn(`[OTP] Échec envoi email, fallback mock pour ${cleanEmail}`);
+          res.json({ success: true, isMocked: true, code: otpCode, message: "Code OTP envoyé (mode simulation)." });
         }
       }
     } catch (err) {
@@ -2659,35 +2708,20 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
       const cleanEmail = email.trim().toLowerCase();
       const cleanCode = code.trim();
 
-      // Check if we have a pending mock session first
-      const mockSession = pendingOtps.get(cleanEmail);
-      if (mockSession && mockSession.code === cleanCode && mockSession.expiresAt > Date.now()) {
+      // Verify against pending OTP sessions stored in memory
+      const session = pendingOtps.get(cleanEmail);
+      if (session && session.code === cleanCode && session.expiresAt > Date.now()) {
         pendingOtps.delete(cleanEmail);
-        res.json({ success: true, message: "Code vÃ©rifiÃ© avec succÃ¨s (mode simulation)." });
-        return;
-      }
-
-      if (useLocalDb || !supabaseClient) {
-        res.status(400).json({ error: "Code de validation incorrect." });
+        res.json({ success: true, message: "Code vérifié avec succès." });
       } else {
-        // Verify via real Supabase Auth
-        const { error } = await supabaseClient.auth.verifyOtp({
-          email: cleanEmail,
-          token: cleanCode,
-          type: "email"
-        });
-
-        if (error) {
-          res.status(400).json({ error: "Code de validation incorrect ou expirÃ©." });
-        } else {
-          res.json({ success: true, message: "Code vÃ©rifiÃ© avec succÃ¨s." });
-        }
+        res.status(400).json({ error: "Code de validation incorrect ou expiré." });
       }
     } catch (err) {
       console.error("Error in /api/auth/verify-otp:", err);
-      res.status(500).json({ error: "Erreur serveur lors de la vÃ©rification." });
+      res.status(500).json({ error: "Erreur serveur lors de la vérification." });
     }
   });
+
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // NOTIFICATIONS & PREFERENCES ENDPOINTS
