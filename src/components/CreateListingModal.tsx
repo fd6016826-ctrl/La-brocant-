@@ -140,40 +140,97 @@ export const CreateListingModal: React.FC<CreateListingModalProps> = ({
     }
   }, [videoType, videoUrlInput, uploadedVideoBase64]);
 
-  // Handle local File selected via system browser
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 8 * 1024 * 1024) {
-      alert("La taille du fichier ne doit pas dépasser 8 Mo.");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setUploadedImageBase64(reader.result as string);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // Handle multiple extra photos
-  const handleAddExtraImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-
-    Array.from(files).forEach((file) => {
-      if (file.size > 8 * 1024 * 1024) {
-        alert("La taille de chaque photo supplémentaire ne doit pas dépasser 8 Mo.");
-        return;
-      }
-
+  // Utility function to compress images client-side before upload
+  const compressImageFile = (file: File, maxWidth = 1200, maxHeight = 1200, quality = 0.75): Promise<string> => {
+    return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setAdditionalImages((prev) => [...prev, reader.result as string]);
+      reader.onerror = () => {
+        // Fallback to uncompressed if reader fails
+        const fallbackReader = new FileReader();
+        fallbackReader.onloadend = () => resolve(fallbackReader.result as string);
+        fallbackReader.readAsDataURL(file);
+      };
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onerror = () => resolve(e.target?.result as string);
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxWidth || height > maxHeight) {
+            if (width / height > maxWidth / maxHeight) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            } else {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            resolve(e.target?.result as string);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL("image/jpeg", quality);
+          resolve(compressedBase64);
+        };
+        img.src = e.target?.result as string;
       };
       reader.readAsDataURL(file);
     });
+  };
+
+  // Handle local File selected via system browser with instant compression
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 15 * 1024 * 1024) {
+      alert("La taille du fichier ne doit pas dépasser 15 Mo.");
+      return;
+    }
+
+    try {
+      const compressed = await compressImageFile(file);
+      setUploadedImageBase64(compressed);
+    } catch (err) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUploadedImageBase64(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Handle multiple extra photos with compression
+  const handleAddExtraImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const fileList = Array.from(files);
+    for (const file of fileList) {
+      if (file.size > 15 * 1024 * 1024) {
+        alert("La taille de chaque photo supplémentaire ne doit pas dépasser 15 Mo.");
+        continue;
+      }
+
+      try {
+        const compressed = await compressImageFile(file);
+        setAdditionalImages((prev) => [...prev, compressed]);
+      } catch (err) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setAdditionalImages((prev) => [...prev, reader.result as string]);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
   };
 
   const handleRemoveExtraImage = (index: number) => {
@@ -230,8 +287,9 @@ export const CreateListingModal: React.FC<CreateListingModalProps> = ({
 
       await onSubmit(payload);
       onClose();
-    } catch (err) {
-      alert("Une erreur s'est produite lors de la mise en ligne.");
+    } catch (err: any) {
+      const errMsg = err?.message || "Une erreur s'est produite lors de la mise en ligne.";
+      alert(errMsg);
     } finally {
       setLoading(false);
     }

@@ -355,8 +355,6 @@ export const DirectChat: React.FC<DirectChatProps> = ({
           "Authorization": `Bearer ${sessionToken}`
         },
         body: JSON.stringify({ 
-          buyerEmail: currentUserEmail, 
-          buyerName: currentUserName,
           requestedQuantity: finalPurchaseQty 
         }),
       });

@@ -11,3 +11,11 @@ project.zip
 .tempmediaStorage
 uploads
 local_db.json
+
+# Build artefacts & sourcemaps (ne jamais committer)
+assets/*.js
+assets/*.css
+api/*.js.map
+*.cjs
+*.cjs.map
+*.tsbuildinfo

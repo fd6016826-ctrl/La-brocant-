@@ -6,26 +6,58 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     email TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     avatar_url TEXT,
-    password TEXT, -- Local fallback authentication
+    password TEXT, -- Hash PBKDF2 UNIQUEMENT (jamais de mot de passe en clair)
     pref_notif_announcements BOOLEAN DEFAULT true, -- User choice for announcement alerts
+    is_pro BOOLEAN DEFAULT false,
+    pro_expires_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- Enable Row Level Security (RLS) for profiles
+-- ⚠️ La colonne password ne doit JAMAIS être lisible via l'API publique
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow public read access to profiles" ON public.profiles;
 CREATE POLICY "Allow public read access to profiles" ON public.profiles FOR SELECT USING (true);
+-- Masquer les hash de mots de passe à toute lecture via PostgREST (even service_key exposes via API)
+REVOKE ALL ON public.profiles FROM anon;
+CREATE OR REPLACE FUNCTION public.safe_profile()
+RETURNS TABLE (email TEXT, name TEXT, avatar_url TEXT, pref_notif_announcements BOOLEAN, is_pro BOOLEAN, pro_expires_at TIMESTAMP WITH TIME ZONE)
+LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT email, name, avatar_url, pref_notif_announcements, is_pro, pro_expires_at FROM public.profiles;
+$$;
+GRANT EXECUTE ON FUNCTION public.safe_profile() TO anon, authenticated;
 DROP POLICY IF EXISTS "Allow owner update access to profiles" ON public.profiles;
 CREATE POLICY "Allow owner update access to profiles" ON public.profiles FOR ALL USING (email = auth.jwt()->>'email') WITH CHECK (email = auth.jwt()->>'email');
 
--- Insert the default active accounts
-INSERT INTO public.profiles (email, name, avatar_url, password, pref_notif_announcements)
-VALUES 
-    ('fd6016826@gmail.com', 'Fallou Diouf', 'data:image/svg+xml;utf8,<svg xmlns=''http://www.w3.org/2000/svg'' viewBox=''0 0 100 100''><defs><linearGradient id=''g1'' x1=''0%'' y1=''0%'' x2=''100%'' y2=''100%''><stop offset=''0%'' stop-color=''%23fbbf24''/><stop offset=''100%'' stop-color=''%23d97706''/></linearGradient></defs><rect width=''100'' height=''100'' rx=''28'' fill=''url(%23g1)''/><g fill=''none'' stroke=''%23ffffff'' stroke-width=''5.5'' stroke-linecap=''round'' stroke-linejoin=' 'round''><path d=''M30 42h40v30c0 4-3 7-7 7H37c-4 0-7-3-7-7V42z''/><path d=''M40 42c0-5 3-9 10-9s10 4 10 9''/><circle cx=''50'' cy=''58'' r=''4'' fill=''%23ffffff''/></g></svg>', 'Diouffallou@2004', true),
-    ('jean.testeur@gmail.com', 'Jean Testeur', 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop', '123456', true),
-    ('sophie.b69@gmail.com', 'Sophie B.', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop', '123456', true)
-ON CONFLICT (email) DO UPDATE 
-SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url, password = EXCLUDED.password;
+-- -----------------------------------------------------------------------------
+-- SUPPRESSION DES COMPTES ET DONNÉES DE TEST
+-- Exécuter UNE FOIS en production pour nettoyer les anciens comptes de démo.
+-- Le profil admin n'est PAS supprimé.
+-- -----------------------------------------------------------------------------
+DELETE FROM public.notifications WHERE user_email IN (
+    'jean.testeur@gmail.com', 'sophie.b69@gmail.com', 'marc.dupuis@outlook.fr', 'pierre.m@gmail.com'
+);
+DELETE FROM public.chats WHERE buyer_email IN (
+    'jean.testeur@gmail.com', 'sophie.b69@gmail.com', 'marc.dupuis@outlook.fr', 'pierre.m@gmail.com'
+) OR seller_email IN (
+    'jean.testeur@gmail.com', 'sophie.b69@gmail.com', 'marc.dupuis@outlook.fr', 'pierre.m@gmail.com'
+);
+DELETE FROM public.demands WHERE buyer_email IN (
+    'jean.testeur@gmail.com', 'sophie.b69@gmail.com', 'marc.dupuis@outlook.fr', 'pierre.m@gmail.com'
+);
+DELETE FROM public.listings WHERE seller_email IN (
+    'jean.testeur@gmail.com', 'sophie.b69@gmail.com', 'marc.dupuis@outlook.fr', 'pierre.m@gmail.com'
+);
+DELETE FROM public.profiles WHERE email IN (
+    'jean.testeur@gmail.com', 'sophie.b69@gmail.com', 'marc.dupuis@outlook.fr', 'pierre.m@gmail.com'
+);
+-- Si des utilisateurs ont été créés via l'inscription OTP et n'ont jamais payé,
+-- ils restent — c'est de vrais comptes. À supprimer manuellement si nécessaire.
+
+-- AUCUN compte n'est créé automatiquement ici.
+-- Le compte administrateur est créé/synchronisé automatiquement à la connexion
+-- (voir /api/auth/login dans server.ts) — définissez ADMIN_EMAIL et ADMIN_PASSWORD
+-- dans les variables d'environnement Vercel.
 
 
 
@@ -171,9 +203,7 @@ DROP POLICY IF EXISTS "Allow user read access to notifications" ON public.notifi
 CREATE POLICY "Allow user read access to notifications" ON public.notifications FOR SELECT USING (user_email = auth.jwt()->>'email');
 
 DROP POLICY IF EXISTS "Allow system insert access to notifications" ON public.notifications;
-CREATE POLICY "Allow system insert access to notifications" ON public.notifications FOR INSERT WITH CHECK (
-    auth.role() = 'authenticated' AND user_email = auth.jwt()->>'email'
-);
+CREATE POLICY "Allow system insert access to notifications" ON public.notifications FOR INSERT WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Allow user update access to notifications" ON public.notifications;
 CREATE POLICY "Allow user update access to notifications" ON public.notifications FOR UPDATE USING (user_email = auth.jwt()->>'email') WITH CHECK (user_email = auth.jwt()->>'email');

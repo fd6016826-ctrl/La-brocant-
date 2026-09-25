@@ -21,36 +21,36 @@ export function getFormattedDate(): string {
 const DEFAULT_GLOBAL_REVIEWS: UserReview[] = [
   {
     id: "seed-rev-1",
-    senderEmail: "jean.testeur@gmail.com",
+    senderEmail: "jean.testeur@example.com",
     senderName: "Jean Testeur",
-    targetEmail: "sophie.b69@gmail.com",
+    targetEmail: "sophie.b@example.com",
     rating: 5,
     text: "Acheteur très courtois et ponctuel. Je recommande vivement pour vos ventes !",
     date: "09/06/2026"
   },
   {
     id: "seed-rev-2",
-    senderEmail: "sophie.b69@gmail.com",
+    senderEmail: "sophie.b@example.com",
     senderName: "Sophie B.",
-    targetEmail: "jean.testeur@gmail.com",
+    targetEmail: "jean.testeur@example.com",
     rating: 5,
     text: "Excellente communication, l'objet livré était dans un état impeccable, transaction en mains propres agréable.",
     date: "02/06/2026"
   },
   {
     id: "seed-rev-3",
-    senderEmail: "marc.dupuis@gmail.com",
+    senderEmail: "marc.dupuis@example.com",
     senderName: "Marc Dupuis",
-    targetEmail: "sophie.b69@gmail.com",
+    targetEmail: "sophie.b@example.com",
     rating: 4,
     text: "Rien à redire, négociation dans le respect mutuel. 5/5 stars !",
     date: "24/05/2026"
   },
   {
     id: "seed-rev-4",
-    senderEmail: "julie.g@gmail.com",
+    senderEmail: "julie.g@example.com",
     senderName: "Julie G.",
-    targetEmail: "selena.fleamarket@yahoo.fr",
+    targetEmail: "selena.fleamarket@example.com",
     rating: 5,
     text: "Super échange, la transaction s'est faite en bas de chez moi en mains propres. L'objet est conforme à la description. Merci !",
     date: "14/06/2026"

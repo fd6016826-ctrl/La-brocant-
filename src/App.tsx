@@ -114,10 +114,10 @@ export default function App() {
 
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
-  // Active Session JWT Token (stored inside sessionStorage for safety)
+  // Active Session Token (signé HMAC par le serveur) — plus jamais l'email brut
   const [sessionToken, setSessionToken] = useState<string>(() => {
     try {
-      return sessionStorage.getItem("brocante_session_token") || "";
+      return sessionStorage.getItem("brocante_session_token") || localStorage.getItem("brocante_session_token") || "";
     } catch {
       return "";
     }
@@ -189,30 +189,15 @@ export default function App() {
   // Settings window visibility toggle
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Active Simulated Accounts list state
+  // Active Simulated Accounts list state — plus aucun compte de démo en dur
   const [simulatedAccounts, setSimulatedAccounts] = useState<{ email: string; name: string; avatar: string }[]>(() => {
     try {
       const stored = localStorage.getItem("brocante_simulated_accounts");
       const parsed = stored ? JSON.parse(stored) : [];
-      const defaults = [
-        { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop" },
-        { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop" }
-      ];
-      const forbidden = ["antigravity@la-brocante.fr", "marc.dupuis@outlook.fr", "pierre.m@gmail.com"];
-      const filteredParsed = parsed.filter((a: any) => a && a.email && !forbidden.includes(a.email.toLowerCase().trim()));
-      
-      const merged = [...defaults];
-      filteredParsed.forEach((a: any) => {
-        if (!merged.some(m => m.email.toLowerCase().trim() === a.email.toLowerCase().trim())) {
-          merged.push(a);
-        }
-      });
-      return merged;
+      const forbidden = ["antigravity@la-brocante.fr", "jean.testeur@gmail.com", "sophie.b69@gmail.com", "marc.dupuis@outlook.fr", "pierre.m@gmail.com"];
+      return parsed.filter((a: any) => a && a.email && !forbidden.includes(a.email.toLowerCase().trim()));
     } catch {
-      return [
-        { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop" },
-        { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop" }
-      ];
+      return [];
     }
   });
 
@@ -380,7 +365,9 @@ export default function App() {
       return;
     }
     try {
-      const res = await fetch(`/api/notifications?email=${encodeURIComponent(currentUserEmail)}`);
+      const res = await fetch(`/api/notifications`, {
+        headers: { "Authorization": `Bearer ${sessionToken}` }
+      });
       if (res.ok) {
         const data = await res.json();
         setNotifications(data);
@@ -388,15 +375,15 @@ export default function App() {
     } catch (err) {
       console.error("Erreur chargement notifications :", err);
     }
-  }, [currentUserEmail]);
+  }, [currentUserEmail, sessionToken]);
 
   const handleMarkAllNotificationsAsRead = async () => {
     if (!currentUserEmail) return;
     try {
       const res = await fetch("/api/notifications/mark-all-read", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: currentUserEmail })
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sessionToken}` },
+        body: JSON.stringify({})
       });
       if (res.ok) {
         fetchNotifications();
@@ -427,7 +414,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/notifications/${id}/read`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sessionToken}` },
         body: JSON.stringify({ read: !current.read })
       });
       if (res.ok) {
@@ -441,7 +428,8 @@ export default function App() {
   const handleClearNotification = async (id: string) => {
     try {
       const res = await fetch(`/api/notifications/${id}`, {
-        method: "DELETE"
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${sessionToken}` }
       });
       if (res.ok) {
         fetchNotifications();
@@ -456,8 +444,8 @@ export default function App() {
     try {
       const res = await fetch("/api/notifications/clear-all", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: currentUserEmail })
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sessionToken}` },
+        body: JSON.stringify({})
       });
       if (res.ok) {
         fetchNotifications();
@@ -570,11 +558,13 @@ export default function App() {
     }
   }, [searchQuery, selectedCategory, selectedCondition, minPrice, maxPrice, locationQuery, sortBy]);
 
-  // Load chat conversations for current simulated profile
+  // Load chat conversations for current authenticated user
   const fetchChats = useCallback(async () => {
     if (!currentUserEmail) return;
     try {
-      const res = await fetch(`/api/chats?email=${encodeURIComponent(currentUserEmail)}`);
+      const res = await fetch(`/api/chats`, {
+        headers: { "Authorization": `Bearer ${sessionToken}` }
+      });
       if (res.ok) {
         const data = await res.json();
         setThreads(data);
@@ -582,7 +572,7 @@ export default function App() {
     } catch (err) {
       console.error("Erreur chargement messages :", err);
     }
-  }, [currentUserEmail]);
+  }, [currentUserEmail, sessionToken]);
 
   // Load buyer demands/announcements
   const fetchDemands = useCallback(async () => {
@@ -631,8 +621,8 @@ export default function App() {
     try {
       const res = await fetch(`/api/chats/${threadId}/read`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: currentUserEmail }),
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sessionToken}` },
+        body: JSON.stringify({}),
       });
       if (res.ok) {
         fetchChats();
@@ -647,8 +637,8 @@ export default function App() {
     try {
       const res = await fetch(`/api/listings/${id}/purchase`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ buyerEmail: currentUserEmail, buyerName: currentUserName }),
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sessionToken}` },
+        body: JSON.stringify({}),
       });
       if (res.ok) {
         const updated = await res.json();
@@ -667,6 +657,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/listings/${id}/sell`, {
         method: "POST",
+        headers: { "Authorization": `Bearer ${sessionToken}` },
       });
       if (res.ok) {
         const updated = await res.json();
@@ -743,9 +734,7 @@ export default function App() {
         body: JSON.stringify({
           listingId,
           text,
-          senderEmail: currentUserEmail,
           senderName: currentUserName,
-          buyerEmail: buyerEmail || currentUserEmail,
           buyerName: buyerName || currentUserName,
         }),
       });
@@ -790,13 +779,7 @@ export default function App() {
         },
         body: JSON.stringify({
           listingId: "demand_ref_" + demand.id,
-          listingTitle: `[Recherche] ${demand.title}`,
-          listingPrice: demand.desiredPrice,
-          listingImageUrl: demand.imageUrl,
-          senderEmail: currentUserEmail,
           senderName: currentUserName,
-          buyerEmail: demand.buyerEmail,
-          buyerName: demand.buyerName,
           text: "", // Empty to let the user review and click send manually
         }),
       });
@@ -839,10 +822,18 @@ export default function App() {
       });
 
       if (res.ok) {
-        fetchListings();
+        await fetchListings();
+      } else {
+        let errText = "Erreur lors de la création de l'annonce.";
+        try {
+          const errData = await res.json();
+          if (errData?.error) errText = errData.error;
+        } catch {}
+        throw new Error(errText);
       }
     } catch (err) {
       console.error(err);
+      throw err;
     }
   };
 
@@ -859,10 +850,18 @@ export default function App() {
       });
 
       if (res.ok) {
-        fetchDemands();
+        await fetchDemands();
+      } else {
+        let errText = "Erreur lors de la publication de la demande.";
+        try {
+          const errData = await res.json();
+          if (errData?.error) errText = errData.error;
+        } catch {}
+        throw new Error(errText);
       }
     } catch (err) {
       console.error("Erreur de publication de recherche", err);
+      throw err;
     }
   };
 
@@ -871,6 +870,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/listings/${id}/toggle-sold`, {
         method: "PATCH",
+        headers: { "Authorization": `Bearer ${sessionToken}` },
       });
       if (res.ok) {
         const updated = await res.json();
@@ -893,6 +893,9 @@ export default function App() {
           "Authorization": `Bearer ${sessionToken}`
         }
       });
+      if (res.status === 401 || res.status === 403) {
+        console.error("Action non autorisée : session invalide ou propriétaire différent.");
+      }
       if (res.ok) {
         setActiveListing(null);
         fetchListings();
@@ -951,10 +954,7 @@ export default function App() {
         body: JSON.stringify({
           listingId: listing.id,
           text: "", // signifies empty message, just to open/find/create thread
-          senderEmail: currentUserEmail,
           senderName: currentUserName,
-          buyerEmail: currentUserEmail,
-          buyerName: currentUserName,
           requestedQuantity: requestedQty,
         }),
       });
@@ -1003,12 +1003,27 @@ export default function App() {
     }
   }, [simulatedAccounts]);
 
-  const handleProfileSwitch = (email: string) => {
-    const acc = simulatedAccounts.find(a => a.email.toLowerCase() === email.toLowerCase());
-    const mockToken = `mock_jwt_token_${email.toLowerCase().trim()}_${Date.now()}`;
-    sessionStorage.setItem("brocante_session_token", mockToken);
-    setSessionToken(mockToken);
+  const handleProfileSwitch = async (email: string) => {
+    // Demande un vrai token signé au serveur (mode local uniquement)
+    try {
+      const res = await fetch("/api/auth/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (res.ok && data.token) {
+        sessionStorage.setItem("brocante_session_token", data.token);
+        setSessionToken(data.token);
+      } else {
+        console.warn(data.error || "Session de simulation refusée par le serveur.");
+        return;
+      }
+    } catch {
+      return;
+    }
 
+    const acc = simulatedAccounts.find(a => a.email.toLowerCase() === email.toLowerCase());
     if (acc) {
       setCurrentUserEmail(acc.email);
       setCurrentUserName(acc.name);
@@ -1025,6 +1040,7 @@ export default function App() {
 
   const handleLogout = () => {
     sessionStorage.removeItem("brocante_session_token");
+    try { localStorage.removeItem("brocante_session_token"); } catch {}
     setSessionToken("");
     setCurrentUserEmail("");
     setCurrentUserName("");
@@ -1152,7 +1168,10 @@ export default function App() {
                 setCurrentUserEmail(email);
                 setCurrentUserName(name);
                 if (avatar) setCurrentUserAvatar(avatar);
-                if (token) setSessionToken(token);
+                if (token) {
+                  sessionStorage.setItem("brocante_session_token", token);
+                  setSessionToken(token);
+                }
                 setIsLoginOpen(false);
                 setViewMode("marketplace");
               }}

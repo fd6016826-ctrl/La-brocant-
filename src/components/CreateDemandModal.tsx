@@ -57,23 +57,73 @@ export const CreateDemandModal: React.FC<CreateDemandModalProps> = ({
     }
   }, [imageType, selectedStockIndex, uploadedImageBase64]);
 
+  const compressImageFile = (file: File, maxWidth = 1200, maxHeight = 1200, quality = 0.75): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onerror = () => {
+        const fallbackReader = new FileReader();
+        fallbackReader.onloadend = () => resolve(fallbackReader.result as string);
+        fallbackReader.readAsDataURL(file);
+      };
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onerror = () => resolve(e.target?.result as string);
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxWidth || height > maxHeight) {
+            if (width / height > maxWidth / maxHeight) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            } else {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            resolve(e.target?.result as string);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL("image/jpeg", quality);
+          resolve(compressedBase64);
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     processFile(file);
   };
 
-  const processFile = (file: File) => {
-    if (file.size > 8 * 1024 * 1024) {
-      alert("La taille de l'image ne doit pas dépasser 8 Mo.");
+  const processFile = async (file: File) => {
+    if (file.size > 15 * 1024 * 1024) {
+      alert("La taille de l'image ne doit pas dépasser 15 Mo.");
       return;
     }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setUploadedImageBase64(reader.result as string);
+    try {
+      const compressed = await compressImageFile(file);
+      setUploadedImageBase64(compressed);
       setImageType("upload");
-    };
-    reader.readAsDataURL(file);
+    } catch {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUploadedImageBase64(reader.result as string);
+        setImageType("upload");
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -131,7 +181,7 @@ export const CreateDemandModal: React.FC<CreateDemandModalProps> = ({
       onClose();
     } catch (err: any) {
       console.error(err);
-      setErrorMess("Erreur lors de la publication de la recherche d'achat.");
+      setErrorMess(err?.message || "Erreur lors de la publication de la recherche d'achat.");
     } finally {
       setLoading(false);
     }

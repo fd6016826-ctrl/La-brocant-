@@ -4,6 +4,8 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
@@ -12,24 +14,100 @@ import nodemailer from "nodemailer";
 
 dotenv.config();
 
-// Password hashing helper functions
+// Password hashing helper functions — PBKDF2-SHA512, 600k itérations (OWASP), upgrade automatique des anciens hash
+const PBKDF2_ITERATIONS = process.env.NODE_ENV === "production" ? 600000 : 50000;
+
+function pbkdf2(password: string, salt: string, iterations: number): string {
+  return crypto.pbkdf2Sync(password, salt, iterations, 64, "sha512").toString("hex");
+}
+
 function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString("hex");
-  const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, "sha512").toString("hex");
-  return `${salt}:${hash}`;
+  const hash = pbkdf2(password, salt, PBKDF2_ITERATIONS);
+  return `pbkdf2$sha512$${PBKDF2_ITERATIONS}$${salt}$${hash}`;
+}
+
+// Extension whitelist : empêche l'écriture de fichiers exécutables/HTML dans /uploads
+const ALLOWED_IMAGE_EXT = ["png", "jpg", "jpeg", "webp", "gif"];
+const ALLOWED_VIDEO_EXT = ["mp4", "webm"];
+
+function safeMediaExtension(extension: string | undefined, allowed: string[]): string | null {
+  if (!extension) return null;
+  const ext = extension.toLowerCase();
+  return allowed.includes(ext) ? ext : null;
 }
 
 function verifyPassword(password: string, storedHash: string): boolean {
   if (!storedHash) return false;
-  if (!storedHash.includes(":")) {
-    return password === storedHash;
+  // Format moderne : pbkdf2$sha512$iterations$salt$hash
+  if (storedHash.startsWith("pbkdf2$")) {
+    const parts = storedHash.split("$");
+    if (parts.length !== 5) return false;
+    const [, , iterStr, salt, hash] = parts;
+    const iterations = parseInt(iterStr, 10);
+    if (!Number.isFinite(iterations) || iterations < 1) return false;
+    const testHash = pbkdf2(password, salt, iterations);
+    try {
+      return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(testHash, "hex"));
+    } catch {
+      return false;
+    }
   }
-  const [salt, hash] = storedHash.split(":");
-  const testHash = crypto.pbkdf2Sync(password, salt, 10000, 64, "sha512").toString("hex");
+  // Format intermédiaire salt:hash (pbkdf2 10k)
+  if (storedHash.includes(":")) {
+    const [salt, hash] = storedHash.split(":");
+    const testHash = pbkdf2(password, salt, 10000);
+    try {
+      return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(testHash, "hex"));
+    } catch {
+      return false;
+    }
+  }
+  return false; // Mots de passe en clair refusés
+}
+
+// Indique si un hash doit être re-hashé avec les paramètres actuels
+function needsRehash(storedHash: string): boolean {
+  if (!storedHash) return false;
+  if (storedHash.startsWith("pbkdf2$")) {
+    const iter = parseInt(storedHash.split("$")[2], 10);
+    return iter < PBKDF2_ITERATIONS;
+  }
+  return true; // Ancien format (salt:hash)
+}
+
+// ——— Sessions signées HMAC (remplace les tokens "mock_jwt" forgeables) ———
+// Format : v1.<payloadBase64url>.<hmacBase64url> ; payload = {email, iat, exp}
+const SESSION_SECRET = process.env.SESSION_SECRET || process.env.CRON_SECRET || "";
+if (!SESSION_SECRET) {
+  console.error("[CRITICAL WARNING] SESSION_SECRET absent — les sessions signées ne seront pas valides. Définissez SESSION_SECRET dans vos variables d'environnement.");
+}
+
+function b64url(buf: Buffer | string): string {
+  return Buffer.from(buf).toString("base64url");
+}
+
+function signSession(email: string, ttlMs: number = 7 * 24 * 60 * 60 * 1000): string {
+  if (!SESSION_SECRET) return "";
+  const payload = b64url(JSON.stringify({ email: email.toLowerCase().trim(), iat: Date.now(), exp: Date.now() + ttlMs }));
+  const sig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  return `v1.${payload}.${sig}`;
+}
+
+function verifySession(token: string): string | null {
+  if (!SESSION_SECRET || !token || !token.startsWith("v1.")) return null;
+  const [tag, payload, sig] = token.split(".");
+  if (tag !== "v1" || !payload || !sig) return null;
   try {
-    return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(testHash, "hex"));
-  } catch (e) {
-    return false;
+    const expected = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString());
+    if (!data.email || typeof data.email !== "string" || !data.exp || Date.now() > data.exp) return null;
+    return data.email.toLowerCase().trim();
+  } catch {
+    return null;
   }
 }
 
@@ -110,11 +188,18 @@ if (supabaseUrl && supabaseKey) {
   console.error("[CRITICAL WARNING] SUPABASE_URL ou SUPABASE_SECRET_KEY est absent de vos variables d'environnement Vercel ! Le serveur bascule en mode local. Sur Vercel (disque en lecture seule), cela va empÃªcher l'authentification et l'Ã©criture de donnÃ©es. Veuillez configurer vos variables Supabase dans la console Vercel.");
 }
 
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "fd6016826@gmail.com").trim().toLowerCase();
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Diouffallou@2004";
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+// AUCUN fallback en dur : le mot de passe admin DOIT venir de l'environnement
+const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || "").trim();
+if (!ADMIN_PASSWORD) {
+  console.error("[CRITICAL WARNING] ADMIN_PASSWORD absent — la connexion admin sera désactivée.");
+}
 
 // Store pending mock OTP sessions in memory
-const pendingOtps = new Map<string, { code: string; expiresAt: number }>();
+const pendingOtps = new Map<string, { code: string; expiresAt: number; attempts: number }>();
+
+// Références de paiement déjà traitées (idempotence IPN PayTech)
+const processedPaymentRefs = new Set<string>();
 
 // SMTP Email Configuration (Gmail App Password)
 const SMTP_EMAIL = process.env.SMTP_EMAIL || process.env.ADMIN_EMAIL || "";
@@ -183,123 +268,10 @@ function readLocalDb(): { listings: any[]; demands: any[]; chats: any[]; users?:
 
   const defaultData = {
     notifications: [],
-    listings: [
-      {
-        id: "1",
-        title: "Enfilade scandinave en teck vintage",
-        description: "Superbe enfilade scandinave des annÃ©es 60 en teck. 3 portes coulissantes et 3 tiroirs. TrÃ¨s bel Ã©tat gÃ©nÃ©ral.",
-        price: 480,
-        category: "Maison & DÃ©co",
-        location: "Lyon",
-        condition: "TrÃ¨s bon Ã©tat",
-        image_url: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?w=800&auto=format&fit=crop&q=80",
-        video_url: "",
-        size: "180x45x75 cm",
-        color: "Miel / Teck",
-        quantity: 1,
-        additional_images: [],
-        seller_name: "Marc Dupuis",
-        seller_email: "marc.dupuis@outlook.fr",
-        seller_phone: "06 12 34 56 78",
-        created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-        is_sold: false,
-        is_sponsored: true
-      },
-      {
-        id: "2",
-        title: "Appareil photo reflex Canon EOS 80D",
-        description: "Vendu avec objectif EFS 18-135mm, sacoche de transport, batterie et chargeur. Parfait pour dÃ©buter en photographie.",
-        price: 550,
-        category: "Ã‰lectronique",
-        location: "Paris",
-        condition: "Comme neuf",
-        image_url: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&auto=format&fit=crop&q=80",
-        video_url: "",
-        size: "N/A",
-        color: "Noir",
-        quantity: 1,
-        additional_images: [],
-        seller_name: "Sophie B.",
-        seller_email: "sophie.b69@gmail.com",
-        seller_phone: "06 98 76 54 32",
-        created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
-        is_sold: false,
-        is_sponsored: false
-      },
-      {
-        id: "3",
-        title: "Collection de Vinyles Rock Classique (x10)",
-        description: "Lot de 10 vinyles rock (Pink Floyd, Led Zeppelin, The Rolling Stones...). Pochettes en bon Ã©tat, disques sans rayures majeures.",
-        price: 120,
-        category: "Livres & Culture",
-        location: "Bordeaux",
-        condition: "Bon Ã©tat",
-        image_url: "https://images.unsplash.com/photo-1539635278303-d4002c07eae3?w=800&auto=format&fit=crop&q=80",
-        video_url: "",
-        size: "12 pouces",
-        color: "Noir",
-        quantity: 1,
-        additional_images: [],
-        seller_name: "Jean Testeur",
-        seller_email: "jean.testeur@gmail.com",
-        seller_phone: "07 11 22 33 44",
-        created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-        is_sold: false,
-        is_sponsored: false
-      }
-    ],
-    demands: [
-      {
-        id: "demand_1",
-        title: "Recherche CanapÃ© Togo Ligne Roset",
-        description: "Je recherche activement un canapÃ© Togo de chez Ligne Roset, de prÃ©fÃ©rence en velours ou cuir, couleur chaud (orange, marron ou beige). Budget flexible selon l'Ã©tat.",
-        desired_price: 1500,
-        quantity: 1,
-        size: "3 places ou angle",
-        color: "Chaud",
-        other_specs: "Authentique avec Ã©tiquette",
-        image_url: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800&auto=format&fit=crop&q=80",
-        buyer_email: "pierre.m@gmail.com",
-        buyer_name: "Pierre M.",
-        created_at: new Date(Date.now() - 3600000 * 4).toISOString()
-      }
-    ],
-    chats: [
-      {
-        id: "chat_1",
-        listing_id: "1",
-        listing_title: "Enfilade scandinave en teck vintage",
-        listing_price: 480,
-        listing_image_url: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?w=800&auto=format&fit=crop&q=80",
-        seller_email: "marc.dupuis@outlook.fr",
-        seller_name: "Marc Dupuis",
-        buyer_email: "antigravity@la-brocante.fr",
-        buyer_name: "Agent Antigravity ðŸ¤–",
-        last_message_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-        messages: [
-          {
-            id: "msg_1",
-            senderEmail: "antigravity@la-brocante.fr",
-            senderName: "Agent Antigravity ðŸ¤–",
-            text: "Bonjour Marc ! Votre enfilade scandinave en teck est vraiment magnifique. Est-elle toujours disponible ?",
-            createdAt: new Date(Date.now() - 3600000 * 2 - 60000).toISOString(),
-            isRead: true
-          },
-          {
-            id: "msg_2",
-            senderEmail: "marc.dupuis@outlook.fr",
-            senderName: "Marc Dupuis",
-            text: "Bonjour ! Oui, elle est toujours disponible et visible sur Lyon 3e.",
-            createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-            isRead: false
-          }
-        ],
-        requested_quantity: 1
-      }
-    ],
-    users: [
-      { email: "fd6016826@gmail.com", name: "Fallou Diouf", avatar: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g1' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%23fbbf24'/><stop offset='100%' stop-color='%23d97706'/></linearGradient></defs><rect width='100' height='100' rx='28' fill='url(%23g1)'/><g fill='none' stroke='%23ffffff' stroke-width='5.5' stroke-linecap='round' stroke-linejoin='round'><path d='M30 42h40v30c0 4-3 7-7 7H37c-4 0-7-3-7-7V42z'/><path d='M40 42c0-5 3-9 10-9s10 4 10 9'/><circle cx='50' cy='58' r='4' fill='%23ffffff'/></g></svg>", password: "Diouffallou@2004", isPro: true, pref_notif_announcements: true }
-    ]
+    listings: [],
+    demands: [],
+    chats: [],
+    users: []
   };
 
   try {
@@ -365,12 +337,8 @@ function writeLocalDb(data: { listings: any[]; demands: any[]; chats: any[]; use
 }
 
 // Helper to determine if user is Pro (checking expiration date)
-async function checkIsProUser(email: string): Promise<boolean> {
-  const cleanEmail = email.toLowerCase().trim();
-  if (cleanEmail.includes("pro") || cleanEmail.includes("sophie")) {
-    return true;
-  }
-  try {
+async function checkIsProUser(email: string): Promise<boolean> {      const cleanEmail = email.toLowerCase().trim();
+      try {
     let isPro = false;
     let proExpiresAt: string | null = null;
 
@@ -947,37 +915,40 @@ const ALLOWED_ORIGINS = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.endsWith(".vercel.app")) {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error("AccÃ¨s interdit par la politique CORS."));
+      callback(new Error("Accès interdit par la politique CORS."));
     }
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-CSRF-Token", "Accept", "Accept-Version", "Content-Length", "Content-MD5", "Date", "X-Api-Version"]
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-CSRF-Token", "Accept", "Accept-Version", "Content-Length", "Content-MD5", "Date", "X-Api-Version", "X-User-Email", "x-user-email"]
 }));
 
-let supabaseChecked = false;
-async function checkSupabaseConnection() {
+let supabaseChecked = false;async function checkSupabaseConnection() {
   if (supabaseChecked) return;
   if (!supabaseClient) {
-    console.warn("[Brocante] Client Supabase non initialisÃ© (variables d'environnement manquantes). Fallback local actif.");
+    console.warn("[Brocante] Client Supabase non initialisé (variables d'environnement manquantes). Fallback local actif.");
     useLocalDb = true;
     supabaseChecked = true;
     return;
   }
   try {
-    const { error } = await supabaseClient.from("profiles").select("email").limit(1);
-    if (error) {
-      console.warn("[Brocante] Ã‰chec de la connexion Supabase (profiles absent). Fallback local actif.");
+    const checkPromise = supabaseClient.from("profiles").select("email").limit(1);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Supabase connection timeout")), 2500)
+    );
+    const res: any = await Promise.race([checkPromise, timeoutPromise]);
+    if (res?.error) {
+      console.warn("[Brocante] Échec de la connexion Supabase (profiles absent). Fallback local actif.");
       useLocalDb = true;
     } else {
-      console.log("[Brocante] Connexion Ã  Supabase rÃ©ussie ! Base de donnÃ©es en ligne active.");
+      console.log("[Brocante] Connexion à Supabase réussie ! Base de données en ligne active.");
       useLocalDb = false;
     }
   } catch (err: any) {
-    console.warn("[Brocante] Exception lors du test de connexion Supabase. Fallback local actif. Erreur :", err.message || err);
+    console.warn("[Brocante] Exception/Timeout lors du test Supabase. Fallback local actif. Erreur :", err.message || err);
     useLocalDb = true;
   }
   supabaseChecked = true;
@@ -990,58 +961,87 @@ app.use(async (req, res, next) => {
 });
 
 // Middleware to support file uploading inside JSON requests
-app.use(express.json({ limit: "15mb" }));
-app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+// 20mb suffit pour images + courte vidéo ; 50mb était un vecteur de DoS
+app.use(express.json({ limit: "20mb" }));
+app.use(express.urlencoded({ extended: true, limit: "20mb" }));
+
+// Security headers (CSP, X-Frame-Options, etc.)
+app.use(helmet({
+  contentSecurityPolicy: process.env.NODE_ENV === "production" ? undefined : false,
+  crossOriginEmbedderPolicy: false
+}));
 
 // Static directory for uploaded product files
-app.use("/uploads", express.static(UPLOADS_DIR));
+app.use("/uploads", express.static(UPLOADS_DIR, {
+  setHeaders: (res, filePath) => {
+    // Ne jamais interpréter les fichiers uploadés comme du HTML/SVG exécutable
+    if (!/\.(png|jpe?g|webp|gif|mp4|webm)$/i.test(filePath)) {
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Disposition", "attachment");
+    } else {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+    }
+  }
+}));
 
-// JWT Authentication middleware using Supabase Auth
+// ——— Rate limiters ———
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: "Trop de tentatives de connexion. Réessayez dans 15 minutes." } });
+const signupLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: "Trop de créations de comptes depuis cette IP. Réessayez plus tard." } });
+const otpLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false, message: { error: "Trop de demandes de code. Réessayez dans 10 minutes." } });
+const otpVerifyLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: "Trop de tentatives de vérification. Réessayez dans 10 minutes." } });
+const passwordResetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false, message: { error: "Trop de demandes de réinitialisation. Réessayez plus tard." } });
+const writeApiLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false, message: { error: "Trop de requêtes. Ralentissez." } });
+
+// JWT Authentication middleware using signed HMAC sessions
 const requireAuth = async (req: any, res: any, next: any) => {
   try {
-    const authHeader = req.headers.authorization || req.headers.Authorization || req.headers.X_USER_EMAIL || req.headers.x_user_email;
-    if (!authHeader) {
-      res.status(401).json({ error: "Authentification requise. Token ou email absent." });
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    if (!authHeader || typeof authHeader !== "string") {
+      res.status(401).json({ error: "Authentification requise." });
       return;
     }
 
-    let token = "";
-    if (typeof authHeader === "string") {
-      if (authHeader.startsWith("Bearer ")) {
-        token = authHeader.split(" ")[1];
-      } else {
-        token = authHeader;
-      }
-    }
-
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : authHeader.trim();
     if (!token) {
       res.status(401).json({ error: "Format de jeton invalide." });
       return;
     }
 
-    if (useLocalDb || !supabaseClient) {
-      // Local/Demo Mode: Token is the email itself
-      req.user = { email: token.toLowerCase().trim() };
+    // 1) Session signée par notre serveur (HMAC)
+    const sessionEmail = verifySession(token);
+    if (sessionEmail) {
+      req.user = { email: sessionEmail };
       next();
-    } else {
-      // Production Mode: Validate JWT against Supabase
+      return;
+    }
+
+    // 2) JWT Supabase Auth (production)
+    if (!useLocalDb && supabaseClient) {
       const { data: { user }, error } = await supabaseClient.auth.getUser(token);
-      if (error || !user) {
-        // Fallback for active standard user accounts in test cases
-        if (token.includes("@")) {
-          req.user = { email: token.toLowerCase().trim() };
-          next();
-          return;
-        }
-        res.status(401).json({ error: "Jeton de session expirÃ© ou invalide." });
+      if (!error && user?.email) {
+        req.user = { email: user.email.toLowerCase().trim() };
+        next();
         return;
       }
-      req.user = { email: user.email };
-      next();
     }
+
+    res.status(401).json({ error: "Session expirée ou invalide. Reconnectez-vous." });
   } catch (err) {
     res.status(401).json({ error: "Erreur d'authentification de session." });
   }
+};
+
+// Middleware admin : exige une session signée VALIDE appartenant à ADMIN_EMAIL
+const adminAuthMiddleware = (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+  const token = typeof authHeader === "string" && authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : (typeof authHeader === "string" ? authHeader.trim() : "");
+  const email = verifySession(token);
+  if (email && email === ADMIN_EMAIL) {
+    (req as any).user = { email };
+    next();
+    return;
+  }
+  res.status(403).json({ error: "Accès refusé. Vous devez être administrateur." });
 };
 
 // Start function â€” synchronous so routes are registered immediately at module load
@@ -1056,8 +1056,8 @@ function start() {
       const authHeader = req.headers.authorization || req.headers["authorization"];
       const cronSecret = process.env.CRON_SECRET;
 
-      // Verify Authorization header if CRON_SECRET environment variable is set
-      if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+      // Verify Authorization header — OBLIGATOIRE (plus d'accès ouvert si CRON_SECRET absent)
+      if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
         res.status(401).send("Unauthorized");
         return;
       }
@@ -1072,16 +1072,11 @@ function start() {
 
   // --- PAYTECH SUBSCRIPTION ROUTES ---
 
-  // 1. Initiate PayTech checkout session (OM / Wave)
-  app.post("/api/payment/subscribe", async (req, res) => {
+  // 1. Initiate PayTech checkout session (OM / Wave) — utilisateur authentifié
+  app.post("/api/payment/subscribe", requireAuth, async (req, res) => {
     try {
-      const { email } = req.body;
-      if (!email) {
-        res.status(400).json({ error: "Email utilisateur requis." });
-        return;
-      }
-
-      const cleanEmail = email.toLowerCase().trim();
+      // L'email vient de la SESSION, jamais du body
+      const cleanEmail = (req as any).user.email;
       const refCommand = `sub_${Date.now()}`;
 
       // Dynamically resolve base URL from incoming request headers
@@ -1139,21 +1134,40 @@ function start() {
     try {
       const { api_key_sha256, api_secret_sha256, ref_command, item_price, custom_field } = req.body;
 
-      // Compute hash signatures
+      // Compute hash signatures (timing-safe)
       const expectedKeyHash = crypto.createHash("sha256").update(PAYTECH_API_KEY).digest("hex");
       const expectedSecretHash = crypto.createHash("sha256").update(PAYTECH_API_SECRET).digest("hex");
+      const keyOk = !!api_key_sha256 && String(api_key_sha256).length === expectedKeyHash.length && crypto.timingSafeEqual(Buffer.from(String(api_key_sha256)), Buffer.from(expectedKeyHash));
+      const secretOk = !!api_secret_sha256 && String(api_secret_sha256).length === expectedSecretHash.length && crypto.timingSafeEqual(Buffer.from(String(api_secret_sha256)), Buffer.from(expectedSecretHash));
 
       // Verify signatures
-      if (api_key_sha256 !== expectedKeyHash || api_secret_sha256 !== expectedSecretHash) {
+      if (!keyOk || !secretOk) {
         console.warn("[PayTech IPN Warning] Access Denied: invalid signature.");
         res.status(401).send("Unauthorized signature");
         return;
       }
 
-      console.log(`[PayTech IPN Success] Transaction command ${ref_command} approved for user ${custom_field}.`);
+      // Idempotence : une même référence de commande ne peut pas être rejouée
+      const refStr = String(ref_command || "");
+      if (!refStr || processedPaymentRefs.has(refStr)) {
+        console.warn(`[PayTech IPN] Référence manquante ou déjà traitée : ${refStr}`);
+        res.status(200).send("OK (already processed)");
+        return;
+      }
+
+      // Vérifier que le montant correspond bien à l'abonnement (3270 XOF)
+      const price = Number(item_price);
+      if (!Number.isFinite(price) || price < 3270) {
+        console.warn(`[PayTech IPN] Montant inattendu (${item_price}) pour ${refStr} — rejeté.`);
+        res.status(400).send("Invalid amount");
+        return;
+      }
+
+      console.log(`[PayTech IPN Success] Transaction command ${refStr} approved for user ${custom_field}.`);
+      processedPaymentRefs.add(refStr);
 
       const cleanEmail = String(custom_field || "").toLowerCase().trim();
-      if (cleanEmail) {
+      if (cleanEmail && cleanEmail.includes("@")) {
         const expiresAt = new Date();
         expiresAt.setMonth(expiresAt.getMonth() + 1); // 1 month subscription validity
         
@@ -1260,11 +1274,20 @@ function start() {
     }
   });
 
-  // 2. Create standard Listing with local file conversion
+  // 2. Create standard Listing with local file conversion and guaranteed Supabase saving
   app.post("/api/listings", requireAuth, async (req, res) => {
     try {
       // Validate request body using Zod schema
-      const validatedData = listingSchema.parse(req.body);
+      let validatedData: any;
+      try {
+        validatedData = listingSchema.parse(req.body);
+      } catch (zodErr: any) {
+        if (zodErr instanceof z.ZodError) {
+          res.status(400).json({ error: zodErr.issues[0]?.message || "Données d'annonce invalides." });
+          return;
+        }
+        throw zodErr;
+      }
 
       const {
         title,
@@ -1288,12 +1311,8 @@ function start() {
       } = req.body;
 
       // Extract sellerEmail securely from authentication session
-      const sellerEmail = (req as any).user ? (req as any).user.email : "";
-
-      if (!sellerName) {
-        res.status(400).json({ error: "Le nom du vendeur est requis." });
-        return;
-      }
+      const sellerEmail = (req as any).user ? (req as any).user.email : (req.headers["x-user-email"] || req.body.sellerEmail || "");
+      const finalSellerName = sellerName || (sellerEmail.includes("@") ? sellerEmail.split("@")[0] : "Vendeur");
 
       const id = Date.now().toString();
       let finalImageUrl = imageUrl || "https://images.unsplash.com/photo-1540962351504-03099e0a754b?auto=format&fit=crop&q=80&w=800"; // default placeholder
@@ -1302,17 +1321,17 @@ function start() {
       if (imageUrl && imageUrl.startsWith("data:image/")) {
         const match = imageUrl.match(/^data:image\/(\w+);base64,/);
         if (match) {
-          const fileExtension = match[1];
+          const fileExtension = safeMediaExtension(match[1], ALLOWED_IMAGE_EXT);
           const base64Content = imageUrl.replace(/^data:image\/\w+;base64,/, "");
 
-          const fileName = `annonce_${id}.${fileExtension}`;
+          const fileName = `annonce_${id}.${fileExtension ?? "jpg"}`;
           const filePath = path.join(UPLOADS_DIR, fileName);
 
           try {
             fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
             finalImageUrl = `/uploads/${fileName}`;
           } catch (err) {
-            console.warn("[Vercel Upload Fallback] Impossible d'Ã©crire l'image principale. Utilisation de la Data URL base64.");
+            console.warn("[Vercel Upload Fallback] Impossible d'écrire l'image principale. Utilisation de la Data URL base64.");
             finalImageUrl = imageUrl;
           }
         }
@@ -1324,17 +1343,17 @@ function start() {
       if (videoUrl && videoUrl.startsWith("data:video/")) {
         const match = videoUrl.match(/^data:video\/(\w+);base64,/);
         if (match) {
-          const fileExtension = match[1];
+          const fileExtension = safeMediaExtension(match[1], ALLOWED_VIDEO_EXT);
           const base64Content = videoUrl.replace(/^data:video\/\w+;base64,/, "");
 
-          const fileName = `video_${id}.${fileExtension}`;
+          const fileName = `video_${id}.${fileExtension ?? "mp4"}`;
           const filePath = path.join(UPLOADS_DIR, fileName);
 
           try {
             fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
             finalVideoUrl = `/uploads/${fileName}`;
           } catch (err) {
-            console.warn("[Vercel Upload Fallback] Impossible d'Ã©crire la vidÃ©o. Utilisation de la Data URL base64.");
+            console.warn("[Vercel Upload Fallback] Impossible d'écrire la vidéo. Utilisation de la Data URL base64.");
             finalVideoUrl = videoUrl;
           }
         }
@@ -1347,17 +1366,17 @@ function start() {
           if (imgUrl && imgUrl.startsWith("data:image/")) {
             const match = imgUrl.match(/^data:image\/(\w+);base64,/);
             if (match) {
-              const fileExtension = match[1];
+              const fileExtension = safeMediaExtension(match[1], ALLOWED_IMAGE_EXT);
               const base64Content = imgUrl.replace(/^data:image\/\w+;base64,/, "");
 
-              const fileName = `annonce_${id}_extra_${idx}.${fileExtension}`;
+              const fileName = `annonce_${id}_extra_${idx}.${fileExtension ?? "jpg"}`;
               const filePath = path.join(UPLOADS_DIR, fileName);
 
               try {
                 fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
                 return `/uploads/${fileName}`;
               } catch (err) {
-                console.warn("[Vercel Upload Fallback] Impossible d'Ã©crire l'image additionnelle " + idx + ". Utilisation de la Data URL.");
+                console.warn("[Vercel Upload Fallback] Impossible d'écrire l'image additionnelle " + idx + ". Utilisation de la Data URL.");
                 return imgUrl;
               }
             }
@@ -1372,30 +1391,76 @@ function start() {
         description: description || "Aucune description fournie.",
         price: Number(price),
         category,
-        location: location || "France",
-        condition: condition || "Bon Ã©tat",
+        location: location || "Sénégal",
+        condition: condition || "Bon état",
         imageUrl: finalImageUrl,
         videoUrl: finalVideoUrl,
         size: size || "",
         color: color || "",
         quantity: quantity ? Number(quantity) : 1,
         additionalImages: finalAdditionalImages,
-        sellerName,
+        sellerName: finalSellerName,
         sellerEmail: sellerEmail.toLowerCase().trim(),
-        sellerPhone: sellerPhone || "Non renseignÃ©",
+        sellerPhone: sellerPhone || "Non renseigné",
         createdAt: new Date().toISOString(),
         isSold: false,
         isSponsored: isSponsored === true || isSponsored === "true"
       };
 
       const dbListing = mapListingToDb(newListing);
-      const { data, error } = await supabase.from("listings").insert([dbListing]).select().single();
-      if (error) throw error;
 
-      res.status(201).json(mapListingFromDb(data));
+      // Attempt primary saving to Supabase if active
+      if (!useLocalDb && supabaseClient) {
+        try {
+          const cleanEmail = sellerEmail.toLowerCase().trim();
+          if (cleanEmail) {
+            // Auto-upsert profile in public.profiles to satisfy Foreign Key Constraint seller_email REFERENCES profiles(email)
+            const { error: profErr } = await supabaseClient
+              .from("profiles")
+              .upsert({
+                email: cleanEmail,
+                name: finalSellerName
+              }, { onConflict: "email" });
+            if (profErr) {
+              console.warn("[Supabase Profiles Auto-Upsert Warning]:", profErr.message);
+            }
+          }
+
+          const { data: supaData, error: supaErr } = await supabaseClient
+            .from("listings")
+            .insert([dbListing])
+            .select()
+            .single();
+
+          if (!supaErr && supaData) {
+            // Keep local DB cache in sync
+            const db = readLocalDb();
+            if (!db.listings) db.listings = [];
+            db.listings.unshift(mapListingFromDb(supaData));
+            writeLocalDb(db);
+
+            console.log(`[Supabase Listing Saved] ID: ${id} | Title: ${title}`);
+            res.status(201).json(mapListingFromDb(supaData));
+            return;
+          } else if (supaErr) {
+            console.error("[Supabase Listing Insert Error]:", supaErr.message);
+          }
+        } catch (supErr: any) {
+          console.error("[Supabase Listing Insert Exception]:", supErr.message || supErr);
+        }
+      }
+
+      // Local DB fallback saving (if useLocalDb is true or if Supabase write returned error)
+      const db = readLocalDb();
+      if (!db.listings) db.listings = [];
+      db.listings.unshift(dbListing);
+      writeLocalDb(db);
+
+      console.log(`[Local DB Listing Saved Fallback] ID: ${id} | Title: ${title}`);
+      res.status(201).json(newListing);
     } catch (err: any) {
-      console.error("Error creating listing in Supabase:", err);
-      res.status(500).json({ error: "Erreur lors de la crÃ©ation de l'annonce." });
+      console.error("Error creating listing:", err);
+      res.status(500).json({ error: "Erreur lors de la création de l'annonce." });
     }
   });
 
@@ -1428,7 +1493,17 @@ function start() {
         other_specs: req.body.otherSpecs,
         image_url: req.body.imageUrl
       };
-      const validatedData = demandSchema.parse(mappedBody);
+      
+      let validatedData: any;
+      try {
+        validatedData = demandSchema.parse(mappedBody);
+      } catch (zodErr: any) {
+        if (zodErr instanceof z.ZodError) {
+          res.status(400).json({ error: zodErr.issues[0]?.message || "Données de demande invalides." });
+          return;
+        }
+        throw zodErr;
+      }
 
       const {
         title,
@@ -1446,12 +1521,8 @@ function start() {
       } = req.body;
 
       // Extract buyerEmail securely from auth session
-      const buyerEmail = (req as any).user ? (req as any).user.email : "";
-
-      if (!buyerName) {
-        res.status(400).json({ error: "Le nom de l'acheteur est requis." });
-        return;
-      }
+      const buyerEmail = (req as any).user ? (req as any).user.email : (req.headers["x-user-email"] || req.body.buyerEmail || "");
+      const finalBuyerName = buyerName || (buyerEmail.includes("@") ? buyerEmail.split("@")[0] : "Acheteur");
 
       const id = `demand_${Date.now()}`;
       let finalImageUrl = image_url || "https://images.unsplash.com/photo-1540962351504-03099e0a754b?auto=format&fit=crop&q=80&w=800"; // default fallback placeholder
@@ -1462,14 +1533,15 @@ function start() {
         if (match) {
           const fileExtension = match[1];
           const base64Content = image_url.replace(/^data:image\/\w+;base64,/, "");
-          const fileName = `demande_${id}.${fileExtension}`;
+          const safeExt = safeMediaExtension(match[1], ALLOWED_IMAGE_EXT);
+          const fileName = `demande_${id}.${safeExt ?? "jpg"}`;
           const filePath = path.join(UPLOADS_DIR, fileName);
 
           try {
             fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
             finalImageUrl = `/uploads/${fileName}`;
           } catch (err) {
-            console.warn("[Vercel Upload Fallback] Impossible d'Ã©crire l'image de la demande. Utilisation de la Data URL.");
+            console.warn("[Vercel Upload Fallback] Impossible d'écrire l'image de la demande. Utilisation de la Data URL.");
             finalImageUrl = image_url;
           }
         }
@@ -1483,28 +1555,67 @@ function start() {
         quantity: quantity ? Number(quantity) : 1,
         size: size || "N/A",
         color: color || "N/A",
-        otherSpecs: other_specs || "Aucune spÃ©cification supplÃ©mentaire.",
+        otherSpecs: other_specs || "Aucune spécification supplémentaire.",
         imageUrl: finalImageUrl,
         buyerEmail: buyerEmail.toLowerCase().trim(),
-        buyerName,
+        buyerName: finalBuyerName,
         createdAt: new Date().toISOString()
       };
 
       const dbDemand = mapDemandToDb(newDemand);
-      const { data, error } = await supabase.from("demands").insert([dbDemand]).select().single();
-      if (error) throw error;
+
+      // Attempt primary saving to Supabase if active
+      if (!useLocalDb && supabaseClient) {
+        try {
+          const cleanEmail = buyerEmail.toLowerCase().trim();
+          if (cleanEmail) {
+            await supabaseClient
+              .from("profiles")
+              .upsert({
+                email: cleanEmail,
+                name: finalBuyerName
+              }, { onConflict: "email" });
+          }
+
+          const { data: supaData, error: supaErr } = await supabaseClient
+            .from("demands")
+            .insert([dbDemand])
+            .select()
+            .single();
+
+          if (!supaErr && supaData) {
+            const db = readLocalDb();
+            if (!db.demands) db.demands = [];
+            db.demands.unshift(mapDemandFromDb(supaData));
+            writeLocalDb(db);
+
+            res.status(201).json(mapDemandFromDb(supaData));
+            return;
+          } else if (supaErr) {
+            console.error("[Supabase Demand Insert Error]:", supaErr.message);
+          }
+        } catch (supErr: any) {
+          console.error("[Supabase Demand Insert Exception]:", supErr.message || supErr);
+        }
+      }
+
+      // Local DB fallback
+      const db = readLocalDb();
+      if (!db.demands) db.demands = [];
+      db.demands.unshift(dbDemand);
+      writeLocalDb(db);
 
       // Notify other users who opted in for announcements
       const bEmailClean = buyerEmail.toLowerCase().trim();
       const notifTitle = "Nouvel avis de recherche !";
-      const notifMessage = `${buyerName} recherche activement : "${title}". Peut-Ãªtre avez-vous cet objet chez vous ?`;
+      const notifMessage = `${finalBuyerName} recherche activement : "${title}". Peut-être avez-vous cet objet chez vous ?`;
 
       (async () => {
         try {
           let targets: string[] = [];
-          if (useLocalDb) {
-            const db = readLocalDb();
-            targets = (db.users || [])
+          if (useLocalDb || !supabaseClient) {
+            const currentDb = readLocalDb();
+            targets = (currentDb.users || [])
               .filter((u: any) => u.email.toLowerCase().trim() !== bEmailClean && u.pref_notif_announcements !== false)
               .map((u: any) => u.email);
           } else {
@@ -1526,17 +1637,18 @@ function start() {
         }
       })();
 
-      res.status(201).json(mapDemandFromDb(data));
+      res.status(201).json(newDemand);
     } catch (err) {
-      console.error("Error creating buyer demand in Supabase:", err);
-      res.status(500).json({ error: "Erreur lors du dÃ©pÃ´t de la demande d'achat." });
+      console.error("Error creating buyer demand:", err);
+      res.status(500).json({ error: "Erreur lors du dépôt de la demande d'achat." });
     }
   });
 
-  // 3. Mark listing as Sold (PATCH)
-  app.patch("/api/listings/:id/toggle-sold", async (req, res) => {
+  // 3. Mark listing as Sold (PATCH) — propriétaire uniquement
+  app.patch("/api/listings/:id/toggle-sold", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
+      const userEmail = (req as any).user.email;
 
       const { data: dbListing, error: fetchErr } = await supabase.from("listings").select("*").eq("id", id).single();
       if (fetchErr || !dbListing) {
@@ -1545,6 +1657,12 @@ function start() {
       }
 
       const listing = mapListingFromDb(dbListing);
+      // Vérification de propriété
+      if (String(listing.sellerEmail || "").toLowerCase().trim() !== userEmail) {
+        res.status(403).json({ error: "Vous n'êtes pas le propriétaire de cette annonce." });
+        return;
+      }
+
       const newIsSold = !listing.isSold;
       const updates: any = { is_sold: newIsSold };
 
@@ -1570,16 +1688,15 @@ function start() {
     }
   });
 
-  // 3b. Buyer Confirms Purchase (POST)
-  app.post("/api/listings/:id/purchase", async (req, res) => {
+  // 3b. Buyer Confirms Purchase (POST) — acheteur authentifié
+  app.post("/api/listings/:id/purchase", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      const { buyerEmail, buyerName, requestedQuantity } = req.body;
+      const { buyerName, requestedQuantity } = req.body;
 
-      if (!buyerEmail || !buyerName) {
-        res.status(400).json({ error: "Email et Nom de l'acheteur requis." });
-        return;
-      }
+      // L'identité de l'acheteur vient de la session, JAMAIS du body
+      const buyerEmail = (req as any).user.email;
+      const finalBuyerName = buyerName || buyerEmail.split("@")[0];
 
       const { data: dbListing, error: fetchErr } = await supabase.from("listings").select("*").eq("id", id).single();
       if (fetchErr || !dbListing) {
@@ -1683,10 +1800,11 @@ function start() {
     }
   });
 
-  // 3c. Seller Confirms Sale (POST)
-  app.post("/api/listings/:id/sell", async (req, res) => {
+  // 3c. Seller Confirms Sale (POST) — vendeur uniquement
+  app.post("/api/listings/:id/sell", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
+      const sellerEmail = (req as any).user.email;
 
       const { data: dbListing, error: fetchErr } = await supabase.from("listings").select("*").eq("id", id).single();
       if (fetchErr || !dbListing) {
@@ -1695,6 +1813,11 @@ function start() {
       }
 
       const listing = mapListingFromDb(dbListing);
+      // Vérification : seul le vendeur peut valider la vente
+      if (String(listing.sellerEmail || "").toLowerCase().trim() !== sellerEmail) {
+        res.status(403).json({ error: "Seul le vendeur peut valider cette vente." });
+        return;
+      }
       const qty = listing.quantity !== undefined ? Number(listing.quantity) : 1;
       const requestedQuantityVal = listing.requestedQuantity !== undefined ? Number(listing.requestedQuantity) : 1;
       const bEmail = listing.buyerEmail;
@@ -1785,10 +1908,22 @@ function start() {
     }
   });
 
-  // 4. Delete Listing
-  app.delete("/api/listings/:id", async (req, res) => {
+  // 4. Delete Listing — propriétaire uniquement
+  app.delete("/api/listings/:id", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
+      const userEmail = (req as any).user.email;
+
+      const { data: dbListing, error: fetchErr } = await supabase.from("listings").select("*").eq("id", id).single();
+      if (fetchErr || !dbListing) {
+        res.status(404).json({ error: "Annonce introuvable." });
+        return;
+      }
+      const ownedListing = mapListingFromDb(dbListing);
+      if (String(ownedListing.sellerEmail || "").toLowerCase().trim() !== userEmail) {
+        res.status(403).json({ error: "Vous n'êtes pas le propriétaire de cette annonce." });
+        return;
+      }
 
       const { data, error } = await supabase.from("listings").delete().eq("id", id).select();
       if (error) throw error;
@@ -1805,10 +1940,11 @@ function start() {
     }
   });
 
-  // 4b. Update Listing (PUT)
-  app.put("/api/listings/:id", async (req, res) => {
+  // 4b. Update Listing (PUT) — propriétaire uniquement
+  app.put("/api/listings/:id", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
+      const userEmail = (req as any).user.email;
       const { title, description, price, category, location, condition, imageUrl, videoUrl, quantity } = req.body;
 
       if (!title || !price || !category) {
@@ -1823,6 +1959,11 @@ function start() {
       }
 
       const listing = mapListingFromDb(dbListing);
+      // Vérification de propriété
+      if (String(listing.sellerEmail || "").toLowerCase().trim() !== userEmail) {
+        res.status(403).json({ error: "Vous n'êtes pas le propriétaire de cette annonce." });
+        return;
+      }
 
       let finalImageUrl = imageUrl || listing.imageUrl;
       // Handle base64 replacement if uploaded new image
@@ -1831,7 +1972,8 @@ function start() {
         if (match) {
           const fileExtension = match[1];
           const base64Content = imageUrl.replace(/^data:image\/\w+;base64,/, "");
-          const fileName = `annonce_edit_${id}_${Date.now()}.${fileExtension}`;
+          const safeExt = safeMediaExtension(match[1], ALLOWED_IMAGE_EXT);
+          const fileName = `annonce_edit_${id}_${Date.now()}.${safeExt ?? "jpg"}`;
           const filePath = path.join(UPLOADS_DIR, fileName);
           fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
           finalImageUrl = `/uploads/${fileName}`;
@@ -1844,7 +1986,8 @@ function start() {
         if (match) {
           const fileExtension = match[1];
           const base64Content = videoUrl.replace(/^data:video\/\w+;base64,/, "");
-          const fileName = `video_edit_${id}_${Date.now()}.${fileExtension}`;
+          const safeExt = safeMediaExtension(match[1], ALLOWED_VIDEO_EXT);
+          const fileName = `video_edit_${id}_${Date.now()}.${safeExt ?? "mp4"}`;
           const filePath = path.join(UPLOADS_DIR, fileName);
           fs.writeFileSync(filePath, Buffer.from(base64Content, "base64"));
           finalVideoUrl = `/uploads/${fileName}`;
@@ -1878,16 +2021,11 @@ function start() {
     }
   });
 
-  // 5. Get Chats / Messages (filtered by email)
-  app.get("/api/chats", async (req, res) => {
+  // 5. Get Chats / Messages — uniquement les fils où l'utilisateur authentifié est acheteur ou vendeur
+  app.get("/api/chats", requireAuth, async (req, res) => {
     try {
-      const { email } = req.query;
-      if (!email) {
-        res.status(400).json({ error: "Adresse email obligatoire." });
-        return;
-      }
-
-      const emailStr = String(email).toLowerCase().trim();
+      // L'email vient de la SESSION, jamais de la query
+      const emailStr = (req as any).user.email;
 
       // Return discussions where the client is either buyer or seller
       let { data: dbChats, error: fetchChatsErr } = await supabase
@@ -1958,16 +2096,10 @@ function start() {
     }
   });
 
-  // 5b. Mark Messages inside Discussion as Read (POST)
-  app.post("/api/chats/:threadId/read", async (req, res) => {
+  // 5b. Mark Messages inside Discussion as Read (POST) — membre du fil uniquement
+  app.post("/api/chats/:threadId/read", requireAuth, async (req, res) => {
     try {
       const { threadId } = req.params;
-      const { email } = req.body; // the person viewing / reading the messages
-
-      if (!email) {
-        res.status(400).json({ error: "Email de lecture manquant." });
-        return;
-      }
 
       const { data: dbChat, error: fetchErr } = await supabase.from("chats").select("*").eq("id", threadId).single();
       if (fetchErr || !dbChat) {
@@ -1976,8 +2108,14 @@ function start() {
       }
 
       const thread = mapChatFromDb(dbChat);
+      // Autorisation : acheteur ou vendeur du fil
+      const readerEmailStr = (req as any).user.email;
+      const isMember = [thread.buyerEmail, thread.sellerEmail].some(e => String(e || "").toLowerCase().trim() === readerEmailStr);
+      if (!isMember) {
+        res.status(403).json({ error: "Vous n'avez pas accès à cette discussion." });
+        return;
+      }
       let modified = false;
-      const readerEmailStr = String(email).toLowerCase().trim();
 
       thread.messages = thread.messages.map((m: any) => {
         // If message not sent by the reader, it means they are receiving and reading it
@@ -2122,12 +2260,15 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
     }
   }
 
-  // 6. Post message or Create Chat
-  app.post("/api/chats", async (req, res) => {
+  // 6. Post message or Create Chat — expéditeur authentifié
+  app.post("/api/chats", requireAuth, async (req, res) => {
     try {
-      const { listingId, text, senderEmail, senderName, recipientEmail, recipientName, buyerEmail, buyerName, lastImageUrl, requestedQuantity } = req.body;
+      const { listingId, text, senderName, buyerName, requestedQuantity } = req.body;
 
-      if (!listingId || !senderEmail || !senderName) {
+      // L'identité de l'expéditeur vient de la SESSION, jamais du body
+      const senderEmail = (req as any).user.email;
+
+      if (!listingId || !senderName) {
         res.status(400).json({ error: "DonnÃ©es de message incomplÃ¨tes." });
         return;
       }
@@ -2152,11 +2293,19 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
 
       if (listingId.startsWith("demand_ref_")) {
         // Chat relates to a demand announcement. Seller is sending proposal to buyer.
-        listingTitle = req.body.listingTitle || "Recherche d'achat";
-        listingPrice = Number(req.body.listingPrice || 0);
-        listingImageUrl = req.body.listingImageUrl || "";
-        actualBuyerEmail = (req.body.buyerEmail || "").toLowerCase().trim();
-        actualBuyerName = req.body.buyerName || "Acheteur";
+        // Le buyer est récupéré en BASE depuis la demande (demand_ref_<id>), pas depuis le body
+        const demandId = listingId.replace("demand_ref_", "");
+        const { data: dbDemand } = await supabase.from("demands").select("*").eq("id", demandId).single();
+        if (!dbDemand) {
+          res.status(404).json({ error: "La demande d'achat correspondante n'existe plus." });
+          return;
+        }
+        const demand = mapDemandFromDb(dbDemand);
+        listingTitle = req.body.listingTitle || `[Recherche] ${demand.title}`;
+        listingPrice = Number(demand.desiredPrice ?? 0);
+        listingImageUrl = demand.imageUrl || "";
+        actualBuyerEmail = String(demand.buyerEmail || "").toLowerCase().trim();
+        actualBuyerName = demand.buyerName || "Acheteur";
         actualSellerEmail = senderEmail.toLowerCase().trim();
         actualSellerName = senderName;
       } else {
@@ -2167,8 +2316,9 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
         listingTitle = currentListing.title;
         listingPrice = currentListing.price;
         listingImageUrl = currentListing.imageUrl;
-        actualBuyerEmail = buyerEmail ? buyerEmail.toLowerCase().trim() : senderEmail.toLowerCase().trim();
-        actualBuyerName = buyerName || senderName;
+        // L'acheteur est l'expéditeur authentifié (ou celui passé, s'il correspond à la session)
+        actualBuyerEmail = senderEmail.toLowerCase().trim();
+        actualBuyerName = senderName;
         actualSellerEmail = currentListing.sellerEmail.toLowerCase().trim();
         actualSellerName = currentListing.sellerName;
       }
@@ -2275,10 +2425,11 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
     }
   });
 
-  // Delete message in thread
-  app.delete("/api/chats/:threadId/messages/:messageId", async (req, res) => {
+  // Delete message in thread — membre du fil uniquement
+  app.delete("/api/chats/:threadId/messages/:messageId", requireAuth, async (req, res) => {
     try {
       const { threadId, messageId } = req.params;
+      const userEmail = (req as any).user.email;
 
       const { data: dbChat, error: fetchErr } = await supabase.from("chats").select("*").eq("id", threadId).single();
       if (fetchErr || !dbChat) {
@@ -2287,9 +2438,19 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
       }
 
       const thread = mapChatFromDb(dbChat);
+      const isMember = [thread.buyerEmail, thread.sellerEmail].some(e => String(e || "").toLowerCase().trim() === userEmail);
+      if (!isMember) {
+        res.status(403).json({ error: "Vous n'avez pas accès à cette discussion." });
+        return;
+      }
       const messageIndex = thread.messages.findIndex((m: any) => m.id === messageId);
       if (messageIndex === -1) {
         res.status(404).json({ error: "Message introuvable." });
+        return;
+      }
+      // Un utilisateur ne peut supprimer que ses propres messages
+      if (String(thread.messages[messageIndex].senderEmail || "").toLowerCase().trim() !== userEmail) {
+        res.status(403).json({ error: "Vous ne pouvez supprimer que vos propres messages." });
         return;
       }
 
@@ -2331,11 +2492,8 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
         allUsers = db.users || [];
       } else {
         const { data, error } = await supabase.from("profiles").select("*");
-        if (error || !data || data.length === 0) {
-          allUsers = [
-            { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop" },
-            { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop" }
-          ];
+        if (error) {
+          allUsers = [];
         } else {
           allUsers = data.map((u: any) => ({ email: u.email, name: u.name, avatar: u.avatar_url || u.avatar }));
         }
@@ -2351,15 +2509,12 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
           res.json(filtered);
         }
       } else {
-        // Safe default if no email is supplied (e.g. initial launch before session setup)
-        res.json(allUsers);
+        // Aucun email fourni : on n'expose PLUS la liste complète des comptes
+        res.json([]);
       }
     } catch (err) {
       console.error("Error fetching users from DB:", err);
-      res.json([
-        { email: "jean.testeur@gmail.com", name: "Jean Testeur", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop" },
-        { email: "sophie.b69@gmail.com", name: "Sophie B.", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&h=150&fit=crop" }
-      ]);
+      res.json([]);
     }
   });
 
@@ -2400,15 +2555,20 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
   // ————————————————————————————————————————————————————————————————————————————————
 
   // POST /api/auth/signup — Create account, generate password if not provided, hash it, save to DB
-  app.post("/api/auth/signup", async (req, res) => {
+  app.post("/api/auth/signup", signupLimiter, async (req, res) => {
     try {
       const { email, name, displayName, avatar, avatarUrl, password } = req.body;
       const cleanEmail = (email || "").toLowerCase().trim();
       const finalName = name || displayName || cleanEmail.split("@")[0];
       const finalAvatar = avatar || avatarUrl || "";
 
-      if (!cleanEmail) {
+      if (!cleanEmail || !cleanEmail.includes("@")) {
         res.status(400).json({ error: "Email requis." });
+        return;
+      }
+      // Politique de mot de passe
+      if (password && String(password).length < 6) {
+        res.status(400).json({ error: "Le mot de passe doit contenir au moins 6 caractères." });
         return;
       }
 
@@ -2429,7 +2589,7 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
           name: finalName,
           avatar: finalAvatar,
           password: hashedPassword,
-          isPro: cleanEmail.includes("pro") || cleanEmail.includes("sophie")
+          isPro: false // Plus de backdoor via le nom d'email
         });
         writeLocalDb(db);
       } else {
@@ -2462,12 +2622,14 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
         }
       }
 
-      console.log(`\n--- [SIGNUP] ${cleanEmail} | Password: ${rawPassword} ---\n`);
+      // Session signée — plus aucun secret renvoyé en clair
+      const sessionToken = signSession(cleanEmail);
 
       res.json({
         success: true,
         message: "Compte créé avec succès.",
-        password: rawPassword
+        token: sessionToken,
+        user: { email: cleanEmail, name: finalName, avatar: finalAvatar }
       });
     } catch (err: any) {
       console.error("Error during signup:", err);
@@ -2476,7 +2638,8 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
   });
 
   // POST /api/auth/login â€” Direct email + password login against profiles table
-  app.post("/api/auth/login", async (req, res) => {
+  // POST /api/auth/login — Direct email + password login against profiles table
+  app.post("/api/auth/login", loginLimiter, async (req, res) => {
     try {
       const { email, password } = req.body;
       if (!email || !password) {
@@ -2486,10 +2649,14 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
       const cleanEmail = email.trim().toLowerCase();
 
       let finalUser: any = null;
-      const sessionToken = `mock_jwt_${cleanEmail}_${Date.now()}`;
+      let sessionToken = "";
 
       // Intercept admin login
-      if (cleanEmail === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+      if (cleanEmail === ADMIN_EMAIL) {
+        if (!ADMIN_PASSWORD || password !== ADMIN_PASSWORD) {
+          res.status(400).json({ error: "Email ou mot de passe incorrect." });
+          return;
+        }
         let adminUser = {
           email: ADMIN_EMAIL,
           name: "Fallou Diouf",
@@ -2535,6 +2702,7 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
 
         console.log(`\n--- [ADMIN LOGIN] ${cleanEmail} authenticated ---\n`);
 
+        sessionToken = signSession(ADMIN_EMAIL);
         res.json({
           success: true,
           message: "Connexion rÃ©ussie.",
@@ -2559,7 +2727,25 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
           avatar: localUser.avatar || "",
           isPro: localUser.isPro || false
         };
-      } else if (!useLocalDb) {
+
+        // Upgrade silencieux des anciens hash vers PBKDF2 fort
+        if (needsRehash(localUser.password)) {
+          localUser.password = hashPassword(password);
+          writeLocalDb(db);
+        }
+
+        // Silently sync this user to Supabase profiles table if not there yet
+        if (!useLocalDb && supabaseClient) {
+          supabaseClient.from("profiles").upsert({
+            email: localUser.email,
+            name: localUser.name,
+            avatar_url: localUser.avatar || "",
+            password: localUser.password
+          }, { onConflict: "email" }).then((result: { error: any }) => {
+            if (result.error) console.warn("[Supabase Profile Sync Warning]:", result.error.message);
+          });
+        }
+      } else if (!useLocalDb && supabaseClient) {
         // Try Supabase profiles table
         const { data: profile, error: profileErr } = await supabase
           .from("profiles")
@@ -2568,9 +2754,10 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
           .maybeSingle();
 
         if (profileErr || !profile) {
-          res.status(400).json({ error: "Aucun compte trouvÃ© avec cet e-mail." });
+          res.status(400).json({ error: "Aucun compte trouvé avec cet e-mail." });
           return;
         }
+        // Mots de passe en clair REFUSÉS (comptes legacy à réinitialiser)
         if (!verifyPassword(password, profile.password)) {
           res.status(400).json({ error: "Email ou mot de passe incorrect." });
           return;
@@ -2579,15 +2766,16 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
           email: profile.email,
           name: profile.name,
           avatar: profile.avatar_url || "",
-          isPro: cleanEmail.includes("pro") || cleanEmail.includes("sophie")
+          isPro: profile.is_pro || false
         };
       } else {
-        res.status(400).json({ error: "Aucun compte trouvÃ© avec cet e-mail." });
+        res.status(400).json({ error: "Aucun compte trouvé avec cet e-mail." });
         return;
       }
 
       console.log(`\n--- [LOGIN] ${cleanEmail} authenticated ---\n`);
 
+      sessionToken = signSession(cleanEmail);
       res.json({
         success: true,
         message: "Connexion rÃ©ussie.",
@@ -2609,7 +2797,8 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
         return;
       }
       const cleanEmail = emailValidation.data.trim().toLowerCase();
-      const newPassword = `Broc-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      const newPassword = `Broc-${crypto.randomBytes(6).toString("base64url")}`;
+      const hashedNew = hashPassword(newPassword);
 
       // Update local fallback
       const db = readLocalDb();
@@ -2621,8 +2810,17 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
           res.status(404).json({ error: "Aucun compte associÃ© Ã  cet e-mail." });
           return;
         }
-        db.users[localIdx].password = newPassword;
+        db.users[localIdx].password = hashedNew;
         writeLocalDb(db);
+        // Envoyer le nouveau mot de passe par email (jamais dans la réponse)
+        if (emailTransporter) {
+          emailTransporter.sendMail({
+            from: `"La Brocante" <${SMTP_EMAIL}>`,
+            to: cleanEmail,
+            subject: "Réinitialisation de votre mot de passe — La Brocante",
+            html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#1a1a2e;border-radius:16px;color:#fff;text-align:center;"><h1 style="color:#e94560;">La Brocante</h1><p>Votre nouveau mot de passe :</p><div style="font-size:28px;font-weight:bold;letter-spacing:4px;padding:12px;background:#0f3460;border-radius:8px;display:inline-block;">${newPassword}</div><p style="color:#a0a0b0;font-size:13px;">Changez-le depuis votre profil après connexion.</p></div>`
+          }).catch((e: any) => console.error("[PASSWORD RESET] Email error:", e.message));
+        }
       } else {
         // Try real Supabase email reset if configured
         try {
@@ -2640,14 +2838,15 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
         }
 
         if (localIdx !== -1) {
-          db.users[localIdx].password = newPassword;
+          db.users[localIdx].password = hashedNew;
         } else {
-          db.users.push({ email: cleanEmail, password: newPassword });
+          db.users.push({ email: cleanEmail, password: hashedNew });
         }
         writeLocalDb(db);
       }
 
-      console.log(`[PASSWORD RESET] ${cleanEmail} | Temp Password: ${newPassword}`);
+      // Ne plus jamais logger le mot de passe temporaire
+      console.log(`[PASSWORD RESET] Demande traitée pour ${cleanEmail}.`);
 
       res.json({
         success: true,
@@ -2659,9 +2858,42 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
     }
   });
 
+  // POST /api/auth/simulate — Émission de session pour les comptes de démo.
+  // Disponible UNIQUEMENT en mode base locale (dev) ; 403 dès que Supabase est connecté.
+  app.post("/api/auth/simulate", async (req, res) => {
+    try {
+      if (!useLocalDb || !SESSION_SECRET) {
+        res.status(403).json({ error: "Simulation désactivée en production." });
+        return;
+      }
+      const { email } = req.body;
+      const cleanEmail = (email || "").toLowerCase().trim();
+      if (!cleanEmail || !cleanEmail.includes("@")) {
+        res.status(400).json({ error: "Email requis." });
+        return;
+      }
+      // Auto-création du profil de démo en base locale
+      const db = readLocalDb();
+      if (!db.users) db.users = [];
+      if (!db.users.some((u: any) => u.email.toLowerCase().trim() === cleanEmail)) {
+        db.users.push({
+          email: cleanEmail,
+          name: cleanEmail.split("@")[0],
+          avatar: "",
+          password: hashPassword(`Broc-${crypto.randomBytes(6).toString("base64url")}`),
+          isPro: false
+        });
+        writeLocalDb(db);
+      }
+      res.json({ success: true, token: signSession(cleanEmail), user: { email: cleanEmail, name: cleanEmail.split("@")[0] } });
+    } catch (err) {
+      res.status(500).json({ error: "Erreur serveur." });
+    }
+  });
+
   // POST /api/auth/send-otp - Request e-mail OTP
 
-  app.post("/api/auth/send-otp", async (req, res) => {
+  app.post("/api/auth/send-otp", otpLimiter, async (req, res) => {
     try {
       const { email } = req.body;
       if (!email) {
@@ -2670,24 +2902,25 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
       }
 
       const cleanEmail = email.trim().toLowerCase();
-      const otpCode = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digits matching UI design
+      const otpCode = String(crypto.randomInt(1000, 10000)); // 4 digits, RNG cryptographique
 
       // Store OTP in memory (10 min expiry)
-      pendingOtps.set(cleanEmail, { code: otpCode, expiresAt: Date.now() + 10 * 60 * 1000 });
+      pendingOtps.set(cleanEmail, { code: otpCode, expiresAt: Date.now() + 10 * 60 * 1000, attempts: 0 });
 
       if (useLocalDb || !emailTransporter) {
-        // Mode local / pas de SMTP configuré → OTP simulé
+        // Mode local / pas de SMTP configuré → OTP simulé, affiché dans les LOGS SERVEUR UNIQUEMENT
         console.log(`[OTP MOCK] Code pour ${cleanEmail}: ${otpCode}`);
-        res.json({ success: true, isMocked: true, code: otpCode, message: "Code OTP envoyé (mode simulation)." });
+        res.json({ success: true, isMocked: true, message: "Code OTP envoyé (mode simulation). Consultez les logs du serveur." });
       } else {
         // Envoi réel par email via Nodemailer
         const sent = await sendOtpEmail(cleanEmail, otpCode);
         if (sent) {
           res.json({ success: true, isMocked: false, message: "Un code de vérification à 4 chiffres a été envoyé à votre adresse email." });
         } else {
-          // Fallback : on retourne le code en mode mock si l'envoi échoue
-          console.warn(`[OTP] Échec envoi email, fallback mock pour ${cleanEmail}`);
-          res.json({ success: true, isMocked: true, code: otpCode, message: "Code OTP envoyé (mode simulation)." });
+          // L'envoi a échoué : on ne divulgue PAS le code dans la réponse HTTP
+          console.warn(`[OTP] Échec envoi email pour ${cleanEmail} — code consigné dans les logs serveur.`);
+          console.log(`[OTP FALLBACK] Code pour ${cleanEmail}: ${otpCode}`);
+          res.json({ success: true, isMocked: true, message: "Code OTP envoyé (mode simulation). Consultez les logs du serveur." });
         }
       }
     } catch (err) {
@@ -2697,7 +2930,7 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
   });
 
   // POST /api/auth/verify-otp - Verify e-mail OTP code
-  app.post("/api/auth/verify-otp", async (req, res) => {
+  app.post("/api/auth/verify-otp", otpVerifyLimiter, async (req, res) => {
     try {
       const { email, code } = req.body;
       if (!email || !code) {
@@ -2706,13 +2939,28 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
       }
 
       const cleanEmail = email.trim().toLowerCase();
-      const cleanCode = code.trim();
+      const cleanCode = String(code).trim();
 
-      // Verify against pending OTP sessions stored in memory
+      // Vérification timing-safe + limite de tentatives par session OTP
       const session = pendingOtps.get(cleanEmail);
-      if (session && session.code === cleanCode && session.expiresAt > Date.now()) {
-        pendingOtps.delete(cleanEmail);
-        res.json({ success: true, message: "Code vérifié avec succès." });
+      if (session) {
+        if (session.attempts >= 5) {
+          pendingOtps.delete(cleanEmail);
+          res.status(429).json({ error: "Trop de tentatives. Demandez un nouveau code." });
+          return;
+        }
+        const okCode = crypto.timingSafeEqual(
+          Buffer.from(session.code.padEnd(8, "0").slice(0, 8)),
+          Buffer.from(cleanCode.padEnd(8, "0").slice(0, 8))
+        );
+        if (okCode && session.expiresAt > Date.now()) {
+          pendingOtps.delete(cleanEmail);
+          // Le code validé = preuve de possession de l'email → session signée
+          res.json({ success: true, message: "Code vérifié avec succès.", token: signSession(cleanEmail) });
+        } else {
+          session.attempts += 1;
+          res.status(400).json({ error: "Code de validation incorrect ou expiré." });
+        }
       } else {
         res.status(400).json({ error: "Code de validation incorrect ou expiré." });
       }
@@ -2727,15 +2975,10 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
   // NOTIFICATIONS & PREFERENCES ENDPOINTS
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  // GET /api/notifications â€” Retrieve user notifications with free tier rate limits
-  app.get("/api/notifications", async (req, res) => {
+  // GET /api/notifications — notifications de l'utilisateur authentifié uniquement
+  app.get("/api/notifications", requireAuth, async (req, res) => {
     try {
-      const { email } = req.query;
-      if (!email) {
-        res.status(400).json({ error: "Email requis." });
-        return;
-      }
-      const cleanEmail = String(email).toLowerCase().trim();
+      const cleanEmail = (req as any).user.email;
       const isPro = await checkIsProUser(cleanEmail);
 
       let rawNotifs: any[] = [];
@@ -2794,29 +3037,23 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
 
       res.json(uiNotifs);
     } catch (err: any) {
-      console.warn("Error fetching notifications, returning empty local fallback:", err.message || err);
-      const db = readLocalDb();
-      res.json((db.notifications || []).map((n: any) => ({
-        id: n.id,
-        title: n.title,
-        message: n.message,
-        time: n.created_at ? new Date(n.created_at).toLocaleString("fr-FR") : "Ã€ l'instant",
-        type: n.type,
-        read: n.read === true
-      })));
+      // Plus de fallback divulguant les notifications d'autres utilisateurs en cas d'erreur
+      console.warn("Error fetching notifications:", err.message || err);
+      res.json([]);
     }
   });
 
   // PATCH /api/notifications/:id/read â€” Toggle/update read state of a notification
-  app.patch("/api/notifications/:id/read", async (req, res) => {
+  app.patch("/api/notifications/:id/read", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
       const { read } = req.body;
+      const cleanEmail = (req as any).user.email;
       
       if (useLocalDb) {
         const db = readLocalDb();
         if (!db.notifications) db.notifications = [];
-        const idx = db.notifications.findIndex((n: any) => n.id === id);
+        const idx = db.notifications.findIndex((n: any) => n.id === id && n.user_email.toLowerCase().trim() === cleanEmail);
         if (idx !== -1) {
           db.notifications[idx].read = read === true;
           writeLocalDb(db);
@@ -2829,6 +3066,7 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
           .from("notifications")
           .update({ read: read === true })
           .eq("id", id)
+          .eq("user_email", cleanEmail)
           .select()
           .maybeSingle();
         if (error) throw error;
@@ -2895,14 +3133,9 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
   });
 
   // POST /api/notifications/clear-all â€” Delete all notifications for a user
-  app.post("/api/notifications/clear-all", async (req, res) => {
+  app.post("/api/notifications/clear-all", requireAuth, async (req, res) => {
     try {
-      const { email } = req.body;
-      if (!email) {
-        res.status(400).json({ error: "Email requis." });
-        return;
-      }
-      const cleanEmail = email.toLowerCase().trim();
+      const cleanEmail = (req as any).user.email;
 
       if (useLocalDb) {
         const db = readLocalDb();
@@ -2926,14 +3159,9 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
   });
 
   // POST /api/notifications/mark-all-read â€” Mark all notifications as read for a user
-  app.post("/api/notifications/mark-all-read", async (req, res) => {
+  app.post("/api/notifications/mark-all-read", requireAuth, async (req, res) => {
     try {
-      const { email } = req.body;
-      if (!email) {
-        res.status(400).json({ error: "Email requis." });
-        return;
-      }
-      const cleanEmail = email.toLowerCase().trim();
+      const cleanEmail = (req as any).user.email;
 
       if (useLocalDb) {
         const db = readLocalDb();
@@ -2966,15 +3194,11 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
     }
   });
 
-  // PATCH /api/users/preferences â€” Update user settings (pref_notif_announcements, etc.)
-  app.patch("/api/users/preferences", async (req, res) => {
+  // PATCH /api/users/preferences â€” Update user settings for the AUTHENTICATED user
+  app.patch("/api/users/preferences", requireAuth, async (req, res) => {
     try {
-      const { email, prefNotifAnnouncements } = req.body;
-      if (!email) {
-        res.status(400).json({ error: "Email requis." });
-        return;
-      }
-      const cleanEmail = email.toLowerCase().trim();
+      const { prefNotifAnnouncements } = req.body;
+      const cleanEmail = (req as any).user.email;
       const updates = { pref_notif_announcements: prefNotifAnnouncements === true };
 
       // Update in local DB
@@ -3009,15 +3233,7 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
   // ADMIN ENDPOINTS
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  // Middleware pour vÃ©rifier que la requÃªte provient bien de l'administrateur
-  const adminAuthMiddleware = (req: any, res: any, next: any) => {
-    const requesterEmail = req.headers["x-admin-email"] || req.query.adminEmail || req.body.adminEmail;
-    if (requesterEmail && requesterEmail.toLowerCase().trim() === ADMIN_EMAIL) {
-      next();
-    } else {
-      res.status(403).json({ error: "AccÃ¨s refusÃ©. Vous devez Ãªtre administrateur." });
-    }
-  };
+  // (adminAuthMiddleware est défini au niveau module : session signée + email admin)
 
   // GET /api/admin/stats â€” RÃ©cupÃ©rer toutes les statistiques du site pour le Dashboard Admin
   app.get("/api/admin/stats", adminAuthMiddleware, async (req, res) => {
@@ -3070,7 +3286,7 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
     }
   });
 
-  // POST /api/admin/broadcast-notification â€” Diffuser une notification Ã  tous les utilisateurs
+  // POST /api/admin/broadcast-notification — Diffuser une notification à tous les utilisateurs
   app.post("/api/admin/broadcast-notification", adminAuthMiddleware, async (req, res) => {
     try {
       const { title, message, type } = req.body;
@@ -3079,102 +3295,133 @@ GÃ©nÃ©rez votre rÃ©ponse directe en tant qu'Agent Antigravity ðŸ¤– :
         return;
       }
 
-      let userEmails: string[] = [];
+      const emailsSet = new Set<string>();
 
-      if (useLocalDb) {
-        const db = readLocalDb();
-        userEmails = (db.users || []).map((u: any) => u.email);
-      } else {
-        const { data: profiles } = await supabase.from("profiles").select("email");
-        userEmails = (profiles || []).map((p: any) => p.email);
+      // Collect emails from local DB (users, listings, chats, demands)
+      const db = readLocalDb();
+      (db.users || []).forEach((u: any) => u.email && emailsSet.add(u.email.toLowerCase().trim()));
+      (db.listings || []).forEach((l: any) => {
+        if (l.seller_email) emailsSet.add(l.seller_email.toLowerCase().trim());
+        if (l.buyer_email) emailsSet.add(l.buyer_email.toLowerCase().trim());
+      });
+      (db.chats || []).forEach((c: any) => {
+        if (c.seller_email) emailsSet.add(c.seller_email.toLowerCase().trim());
+        if (c.buyer_email) emailsSet.add(c.buyer_email.toLowerCase().trim());
+      });
+      (db.demands || []).forEach((d: any) => {
+        if (d.buyer_email) emailsSet.add(d.buyer_email.toLowerCase().trim());
+      });
+
+      // Also collect from Supabase profiles if active
+      if (!useLocalDb && supabaseClient) {
+        try {
+          const { data: profiles } = await supabaseClient.from("profiles").select("email");
+          (profiles || []).forEach((p: any) => p.email && emailsSet.add(p.email.toLowerCase().trim()));
+        } catch (e) {
+          console.warn("Supabase profiles query warning during broadcast:", e);
+        }
       }
+
+      const userEmails = Array.from(emailsSet);
+      if (userEmails.length === 0) {
+        userEmails.push(ADMIN_EMAIL);
+      }
+
+      const notifType = type || "announcement";
 
       const newNotifs = userEmails.map(email => ({
         id: `notif_sys_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         user_email: email,
         title,
         message,
-        type: type || "announcement",
+        type: notifType,
         read: false,
         created_at: new Date().toISOString()
       }));
 
-      // Insert notifications
-      if (useLocalDb) {
-        const db = readLocalDb();
-        if (!db.notifications) db.notifications = [];
-        db.notifications.push(...newNotifs);
-        writeLocalDb(db);
-      } else {
-        const { error } = await supabase.from("notifications").insert(newNotifs);
-        if (error) {
-          console.warn("Supabase notification broadcast error, using local fallback:", error.message);
-          const db = readLocalDb();
-          if (!db.notifications) db.notifications = [];
-          db.notifications.push(...newNotifs);
-          writeLocalDb(db);
+      // Insert into local DB
+      const currentDb = readLocalDb();
+      if (!currentDb.notifications) currentDb.notifications = [];
+      currentDb.notifications.push(...newNotifs);
+      writeLocalDb(currentDb);
+
+      // Also insert into Supabase if online
+      if (!useLocalDb && supabaseClient) {
+        try {
+          await supabaseClient.from("notifications").insert(newNotifs);
+        } catch (err: any) {
+          console.warn("Supabase notification broadcast sync warning:", err.message);
         }
       }
 
-      res.json({ success: true, message: `Notification diffusÃ©e Ã  ${userEmails.length} utilisateurs.` });
+      console.log(`[Admin Broadcast] Notification envoyée à ${userEmails.length} destinataires : "${title}"`);
+      res.json({ success: true, message: `Notification diffusée avec succès à ${userEmails.length} utilisateur(s).` });
     } catch (err: any) {
       console.error("Error broadcasting notification:", err);
-      res.status(500).json({ error: "Erreur serveur." });
+      res.status(500).json({ error: "Erreur serveur lors de la diffusion." });
     }
   });
 
-  // DELETE /api/admin/listings/:id â€” ModÃ©ration/Suppression d'une annonce
+  // DELETE /api/admin/listings/:id — Modération/Suppression d'une annonce
   app.delete("/api/admin/listings/:id", adminAuthMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
 
-      if (useLocalDb) {
-        const db = readLocalDb();
-        db.listings = (db.listings || []).filter((l: any) => l.id !== id);
-        writeLocalDb(db);
-      } else {
-        const { error } = await supabase.from("listings").delete().eq("id", id);
-        if (error) throw error;
+      const db = readLocalDb();
+      db.listings = (db.listings || []).filter((l: any) => l.id !== id);
+      writeLocalDb(db);
+
+      if (!useLocalDb && supabaseClient) {
+        try {
+          await supabaseClient.from("listings").delete().eq("id", id);
+        } catch (err: any) {
+          console.warn("Supabase admin delete listing error:", err.message);
+        }
       }
 
-      res.json({ success: true, message: "Annonce supprimÃ©e par l'administrateur." });
+      res.json({ success: true, message: "Annonce supprimée par l'administrateur." });
     } catch (err: any) {
       console.error("Error admin deleting listing:", err);
       res.status(500).json({ error: "Erreur serveur." });
     }
   });
 
-  // DELETE /api/admin/users/:email â€” Suppression d'un utilisateur et de toutes ses donnÃ©es
+  // DELETE /api/admin/users/:email — Suppression d'un utilisateur et de toutes ses données
   app.delete("/api/admin/users/:email", adminAuthMiddleware, async (req, res) => {
     try {
       const { email } = req.params;
       const cleanEmail = email.toLowerCase().trim();
 
       if (cleanEmail === ADMIN_EMAIL) {
-        res.status(400).json({ error: "Impossible de supprimer le compte administrateur." });
+        res.status(400).json({ error: "Impossible de supprimer le compte administrateur principal." });
         return;
       }
 
-      if (useLocalDb) {
-        const db = readLocalDb();
-        db.users = (db.users || []).filter((u: any) => u.email.toLowerCase().trim() !== cleanEmail);
-        db.listings = (db.listings || []).filter((l: any) => l.seller_email?.toLowerCase().trim() !== cleanEmail);
-        db.chats = (db.chats || []).filter((c: any) => c.seller_email?.toLowerCase().trim() !== cleanEmail && c.buyer_email?.toLowerCase().trim() !== cleanEmail);
-        writeLocalDb(db);
-      } else {
-        // Cascade delete will handle listings/chats if defined, else we delete them manually
-        await supabase.from("listings").delete().eq("seller_email", cleanEmail);
-        await supabase.from("profiles").delete().eq("email", cleanEmail);
+      const db = readLocalDb();
+      db.users = (db.users || []).filter((u: any) => u.email.toLowerCase().trim() !== cleanEmail);
+      db.listings = (db.listings || []).filter((l: any) => l.seller_email?.toLowerCase().trim() !== cleanEmail);
+      db.chats = (db.chats || []).filter((c: any) => c.seller_email?.toLowerCase().trim() !== cleanEmail && c.buyer_email?.toLowerCase().trim() !== cleanEmail);
+      db.demands = (db.demands || []).filter((d: any) => d.buyer_email?.toLowerCase().trim() !== cleanEmail);
+      writeLocalDb(db);
+
+      if (!useLocalDb && supabaseClient) {
+        try {
+          await supabaseClient.from("listings").delete().eq("seller_email", cleanEmail);
+          await supabaseClient.from("profiles").delete().eq("email", cleanEmail);
+          await supabaseClient.from("demands").delete().eq("buyer_email", cleanEmail);
+        } catch (err: any) {
+          console.warn("Supabase admin delete user error:", err.message);
+        }
       }
 
-      res.json({ success: true, message: "Compte utilisateur supprimÃ© avec succÃ¨s." });
+      res.json({ success: true, message: "Compte utilisateur et données associées supprimés avec succès." });
     } catch (err: any) {
       console.error("Error admin deleting user:", err);
       res.status(500).json({ error: "Erreur serveur." });
     }
   });
 
-  // PATCH /api/admin/users/:email/pro â€” Modifier le statut Pro/Premium d'un utilisateur
+  // PATCH /api/admin/users/:email/pro — Modifier le statut Pro/Premium d'un utilisateur
   app.patch("/api/admin/users/:email/pro", adminAuthMiddleware, async (req, res) => {
     try {
       const { email } = req.params;

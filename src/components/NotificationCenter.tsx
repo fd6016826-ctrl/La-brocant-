@@ -12,7 +12,8 @@ import {
   Sparkles,
   ArrowLeft,
   X,
-  BellRing
+  BellRing,
+  Megaphone
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -21,7 +22,7 @@ export interface NotificationItem {
   title: string;
   message: string;
   time: string;
-  type: "system" | "offer" | "neighbor" | "transaction";
+  type: "system" | "offer" | "neighbor" | "transaction" | "announcement";
   read: boolean;
 }
 
@@ -44,15 +45,18 @@ export function NotificationCenter({
   isDarkMode,
   onBackToMarketplace
 }: NotificationCenterProps) {
-  const [activeFilter, setActiveFilter] = useState<"all" | "neighbor" | "offer" | "transaction" | "system">("all");
+  const [activeFilter, setActiveFilter] = useState<"all" | "neighbor" | "offer" | "transaction" | "system" | "announcement">("all");
 
   const filteredNotifications = notifications.filter((notif) => {
     if (activeFilter === "all") return true;
+    if (activeFilter === "announcement") return notif.type === "announcement" || notif.type === "system";
     return notif.type === activeFilter;
   });
 
   const getIcon = (type: NotificationItem["type"]) => {
     switch (type) {
+      case "announcement":
+        return <Megaphone className="w-4 h-4 text-amber-500" />;
       case "neighbor":
         return <MapPin className="w-4 h-4 text-emerald-500" />;
       case "offer":
@@ -68,6 +72,8 @@ export function NotificationCenter({
 
   const getTypeLabel = (type: NotificationItem["type"]) => {
     switch (type) {
+      case "announcement":
+        return "Alerte Globale";
       case "neighbor":
         return "Voisinage";
       case "offer":
@@ -83,6 +89,8 @@ export function NotificationCenter({
 
   const getBgColor = (type: NotificationItem["type"]) => {
     switch (type) {
+      case "announcement":
+        return "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50";
       case "neighbor":
         return "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-900/30";
       case "offer":
@@ -168,6 +176,7 @@ export function NotificationCenter({
       }`}>
         {[
           { key: "all", label: "Toutes" },
+          { key: "announcement", label: "Alertes 📢" },
           { key: "neighbor", label: "Voisins" },
           { key: "offer", label: "Annonces/Objets" },
           { key: "transaction", label: "Transactions" },
@@ -176,7 +185,9 @@ export function NotificationCenter({
           const isActive = activeFilter === tab.key;
           const count = tab.key === "all" 
             ? notifications.length 
-            : notifications.filter(n => n.type === tab.key).length;
+            : tab.key === "announcement"
+              ? notifications.filter(n => n.type === "announcement" || n.type === "system").length
+              : notifications.filter(n => n.type === tab.key).length;
 
           return (
             <button

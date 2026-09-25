@@ -146,7 +146,8 @@ export function LoginPage({
 
       if (data.isMocked) {
         setIsMockOtp(true);
-        setGeneratedOtp(data.code || "");
+        // Le code n'est plus renvoyé par l'API — visible uniquement dans les logs serveur
+        setGeneratedOtp("");
       } else {
         setIsMockOtp(false);
         setGeneratedOtp("");
@@ -243,12 +244,12 @@ export function LoginPage({
           setErrorMsg(data.error || "Email ou mot de passe incorrect.");
           return;
         }
-        // Direct login
-        sessionStorage.setItem("brocante_session_token", data.token);
+        // Direct login — le token signé est transmis au parent qui le stocke
         onSuccess(
           data.user.email,
           data.user.name,
-          data.user.avatar || DEFAULT_AVATAR_PLACEHOLDER
+          data.user.avatar || DEFAULT_AVATAR_PLACEHOLDER,
+          data.token
         );
       } catch (err: any) {
         setErrorMsg("Erreur réseau lors de la connexion: " + (err?.message || "connexion impossible"));
@@ -286,6 +287,8 @@ export function LoginPage({
   };
 
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  // Token signé reçu après vérification OTP réussie
+  const [otpToken, setOtpToken] = useState("");
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -313,11 +316,15 @@ export function LoginPage({
         return;
       }
 
-      // Finalize signup in backend
+      // Capturer le token signé émis par verify-otp
+      if (data.token) setOtpToken(data.token);
+      const otpToken = data.token || "";
+
+      // Finalize signup in backend — le token signé de verify-otp authentifie la session
       if (previousView === "register") {
         const signupRes = await fetch("/api/auth/signup", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${otpToken}` },
           body: JSON.stringify({
             email: email.trim(),
             name: `${firstName.trim()} ${lastName.trim()}`,
@@ -331,11 +338,11 @@ export function LoginPage({
           setIsVerifyingOtp(false);
           return;
         }
-        onSuccess(email.trim().toLowerCase(), `${firstName.trim()} ${lastName.trim()}`, selectedAvatar);
+        onSuccess(email.trim().toLowerCase(), `${firstName.trim()} ${lastName.trim()}`, selectedAvatar, otpToken || signupData.token);
       } else {
         const inferredName = email.split("@")[0];
         const displayName = inferredName.charAt(0).toUpperCase() + inferredName.slice(1);
-        onSuccess(email.trim().toLowerCase(), displayName, DEFAULT_AVATAR_PLACEHOLDER);
+        onSuccess(email.trim().toLowerCase(), displayName, DEFAULT_AVATAR_PLACEHOLDER, otpToken);
       }
     } catch (err) {
       setErrorMsg("Erreur de connexion lors de la vérification OTP.");
@@ -1008,7 +1015,7 @@ export function LoginPage({
               </div>
             </div>
             <button
-              onClick={() => selectSimulated("sophie.b69@gmail.com")}
+              onClick={onClose}
               className="bg-stone-900 hover:bg-stone-850 p-1.5 rounded-lg text-white font-bold transition cursor-pointer"
             >
               <ChevronRight className="w-4 h-4" />

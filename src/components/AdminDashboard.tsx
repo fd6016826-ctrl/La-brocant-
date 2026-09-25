@@ -20,6 +20,7 @@ import {
 import { Listing } from "../types";
 import { formatPrice, Currency } from "../utils/currency";
 import { motion, AnimatePresence } from "motion/react";
+import { getSessionToken } from "../lib/api";
 
 interface AdminStats {
   totalUsers: number;
@@ -41,6 +42,7 @@ interface AdminDashboardProps {
 }
 
 export function AdminDashboard({ adminEmail, currency, onBackToApp }: AdminDashboardProps) {
+  const sessionToken = getSessionToken();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -61,9 +63,9 @@ export function AdminDashboard({ adminEmail, currency, onBackToApp }: AdminDashb
   const fetchStats = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/admin/stats?adminEmail=${encodeURIComponent(adminEmail)}`, {
+      const res = await fetch(`/api/admin/stats`, {
         headers: {
-          "x-admin-email": adminEmail
+          "Authorization": `Bearer ${sessionToken}`
         }
       });
       if (res.ok) {
@@ -93,8 +95,7 @@ export function AdminDashboard({ adminEmail, currency, onBackToApp }: AdminDashb
       const res = await fetch(`/api/admin/listings/${listingId}`, {
         method: "DELETE",
         headers: {
-          "Content-Type": "application/json",
-          "x-admin-email": adminEmail
+          "Authorization": `Bearer ${sessionToken}`
         }
       });
       if (res.ok) {
@@ -115,7 +116,7 @@ export function AdminDashboard({ adminEmail, currency, onBackToApp }: AdminDashb
       const res = await fetch(`/api/admin/users/${encodeURIComponent(userEmail)}`, {
         method: "DELETE",
         headers: {
-          "x-admin-email": adminEmail
+          "Authorization": `Bearer ${sessionToken}`
         }
       });
       if (res.ok) {
@@ -137,7 +138,7 @@ export function AdminDashboard({ adminEmail, currency, onBackToApp }: AdminDashb
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-email": adminEmail
+          "Authorization": `Bearer ${sessionToken}`
         },
         body: JSON.stringify({ isPro: !currentIsPro })
       });
@@ -163,7 +164,7 @@ export function AdminDashboard({ adminEmail, currency, onBackToApp }: AdminDashb
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-email": adminEmail
+          "Authorization": `Bearer ${sessionToken}`
         },
         body: JSON.stringify({
           title: notifTitle,

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { getSessionToken } from "../lib/api";
 import { 
   X, 
   User, 
@@ -181,16 +182,7 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
   const [reviewsLeft, setReviewsLeft] = useState<{ id: string; targetEmail: string; targetName: string; rating: number; text: string; date: string }[]>(() => {
     try {
       const stored = localStorage.getItem("brocante_user_reviews_left");
-      return stored ? JSON.parse(stored) : [
-        {
-          id: "rev-1",
-          targetEmail: "sophie.b69@gmail.com",
-          targetName: "Sophie B.",
-          rating: 5,
-          text: "Achat négocié très rapidement, l'objet correspond parfaitement et l'échange a été super constructif !",
-          date: "12/06/2026"
-        }
-      ];
+      return stored ? JSON.parse(stored) : [];
     } catch {
       return [];
     }
@@ -448,12 +440,11 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
   const handleConfirmOrderDelivery = async (id: string, isBuyer: boolean) => {
     try {
       const endpoint = isBuyer ? `/api/listings/${id}/purchase` : `/api/listings/${id}/sell`;
-      const body = isBuyer ? { buyerEmail: currentUserEmail, buyerName: currentUserName } : {};
       
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${getSessionToken()}` },
+        body: JSON.stringify({})
       });
       if (res.ok) {
         alert("Transaction mise à jour et validée avec succès !");

@@ -391,7 +391,7 @@ export function LandingPage({
                 condition: "Très bon état",
                 imageUrl: "https://images.unsplash.com/photo-1533090161767-e6ffed986c88?w=600",
                 sellerName: "Sophie B.",
-                sellerEmail: "sophie.b69@gmail.com",
+                sellerEmail: "sophie.b@example.com",
                 sellerPhone: "06 12 34 56 78",
                 createdAt: new Date().toISOString(),
                 isSold: false
@@ -406,7 +406,7 @@ export function LandingPage({
                 condition: "Bon état",
                 imageUrl: "https://images.unsplash.com/photo-1549298916-b41d501d3772?w=600",
                 sellerName: "Marc Dupuis",
-                sellerEmail: "marc.dupuis@outlook.fr",
+                sellerEmail: "marc.dupuis@example.com",
                 sellerPhone: "06 87 65 43 21",
                 createdAt: new Date().toISOString(),
                 isSold: false
@@ -421,7 +421,7 @@ export function LandingPage({
                 condition: "Très bon état",
                 imageUrl: "https://images.unsplash.com/photo-1485965120184-e220f721d03e?w=600",
                 sellerName: "Jean Testeur",
-                sellerEmail: "jean.testeur@gmail.com",
+                sellerEmail: "jean.testeur@example.com",
                 sellerPhone: "06 55 44 33 22",
                 createdAt: new Date().toISOString(),
                 isSold: false
@@ -436,7 +436,7 @@ export function LandingPage({
                 condition: "Comme neuf",
                 imageUrl: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=600",
                 sellerName: "Pierre M.",
-                sellerEmail: "pierre.m@gmail.com",
+                sellerEmail: "pierre.m@example.com",
                 sellerPhone: "06 11 22 33 44",
                 createdAt: new Date().toISOString(),
                 isSold: false

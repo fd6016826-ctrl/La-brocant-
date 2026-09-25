@@ -83,9 +83,9 @@ Dans notre environnement local de développement et de test (sandboxing/hors-lig
       - L'envoi de messages est bloqué pour ces discussions de vente hors-limite avec un bandeau d'information et un bouton d'upgrade vers Brocante Pro.
 
 * **Nettoyage des Comptes Simulés (Front-end) :**
-  - Tous les comptes de test inactifs ou dysfonctionnels ont été supprimés.
-  - Seuls les **deux comptes les plus actifs** ont été conservés : **Jean Testeur** (`jean.testeur@gmail.com`) et **Sophie B.** (`sophie.b69@gmail.com`).
-  - Le compte de l'Agent Antigravity (`antigravity@la-brocante.fr`) ainsi que les autres comptes secondaires ont été entièrement retirés de cette liste.
+  - Tous les comptes de test ont été supprimés (aucun compte de démonstration n'existe plus).
+  - La liste des comptes simulés démarre vide et ne peut plus être pré-remplie.
+  - Le compte de l'Agent Antigravity (`antigravity@la-brocante.fr`) ainsi que tous les comptes secondaires ont été entièrement retirés.
 
 ---
 
